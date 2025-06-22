@@ -26,6 +26,12 @@
         alt="SeedVR2 Space"
     />
   </a>
+  <a href="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler">
+    <img
+      src="https://img.shields.io/badge/SeedVR-ComfyUI-blue?logo=googleplay&logoColor=blue"
+      alt="SeedVR ComfyUI"
+    />
+  </a>
   <a href="https://arxiv.org/abs/2501.01320">
     <img
       src="https://img.shields.io/badge/SeedVR-Paper-red?logo=arxiv&logoColor=red"
@@ -60,10 +66,16 @@
         alt="SeedVR Models"
     />
   </a>
-   <a href="https://huggingface.co/spaces/ByteDance-Seed/SeedVR2-3B">
+  <a href="https://huggingface.co/spaces/ByteDance-Seed/SeedVR2-3B">
     <img 
         src="https://img.shields.io/badge/SeedVR2-Space-orange?logo=huggingface&logoColor=yellow" 
         alt="SeedVR2 Space"
+    />
+  </a>
+  <a href="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler">
+    <img
+      src="https://img.shields.io/badge/SeedVR-ComfyUI-blue?logo=googleplay&logoColor=blue"
+      alt="SeedVR ComfyUI"
     />
   </a>
   <a href="http://arxiv.org/abs/2506.05301">
@@ -90,7 +102,8 @@
 
 We sincerely thank all contributors from the open community for their valuable support.
 
-- **June, 2025:** Repo created.
+- **June 22, 2025:** Huge thanks [NumZ](https://github.com/numz) for building the [ComfyUI](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) [![GitHub Stars](https://img.shields.io/github/stars/numz/ComfyUI-SeedVR2_VideoUpscaler?style=social)](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler)!
+- **June 11, 2025:** Repo created.
 
 
 ## 📮 Notice
