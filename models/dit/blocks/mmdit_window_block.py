@@ -25,7 +25,7 @@ from common.distributed.ops import (
     gather_seq_scatter_heads_qkv,
     scatter_heads,
 )
-
+from common.utils import safe_pad_operation, safe_interpolate_operation
 from ..attention import TorchAttention
 from ..mlp import get_mlp
 from ..mm import MMArg, MMModule
@@ -124,7 +124,7 @@ class MMWindowAttention(nn.Module):
             return rearrange(t, "b h L d -> b h 1 L d").expand(-1, -1, nt * nh * nw, -1, -1)
 
         # Process video attention.
-        vid_msk = F.pad(txt_mask, (tt * hh * ww, 0), value=True)
+        vid_msk = safe_pad_operation(txt_mask, (tt * hh * ww, 0), value=True)
         vid_msk = rearrange(vid_msk, "b l -> b 1 1 1 l").expand(-1, 1, 1, tt * hh * ww, -1)
         vid_out = self.attn(
             vid_window(vid_q),
@@ -144,7 +144,7 @@ class MMWindowAttention(nn.Module):
         vid_out = gather_heads_scatter_seq(vid_out, head_dim=4, seq_dim=2)
 
         # Process text attention.
-        txt_msk = F.pad(txt_mask, (T * H * W, 0), value=True)
+        txt_msk = safe_pad_operation(txt_mask, (T * H * W, 0), value=True)
         txt_msk = rearrange(txt_msk, "b l -> b 1 1 l").expand(-1, 1, L, -1)
         txt_out = self.attn(
             txt_q,

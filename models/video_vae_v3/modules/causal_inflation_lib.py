@@ -97,7 +97,7 @@ class InflatedCausalConv3d(Conv3d):
         if memory_occupy < self.memory_limit or split_dim == x.ndim:
             if prev_cache is not None:
                 x = torch.cat([prev_cache, x], dim=split_dim - 1)
-            x = F.pad(x, padding, value=0.0)
+            x = safe_pad_operation(x, padding, value=0.0)
             with ignore_padding(self):
                 return super().forward(x)
 

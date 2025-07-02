@@ -20,6 +20,7 @@ from einops import rearrange
 
 from common.distributed.advanced import get_sequence_parallel_world_size
 from common.logger import get_logger
+from common.utils import safe_pad_operation
 from models.video_vae_v3.modules.causal_inflation_lib import (
     InflatedCausalConv3d,
     causal_norm_wrapper,
@@ -245,7 +246,7 @@ class Downsample3D(nn.Module):
         assert hidden_states.shape[1] == self.channels
 
         if self.spatial_down:
-            hidden_states = F.pad(hidden_states, (0, 1, 0, 1), mode="constant", value=0)
+            hidden_states = safe_pad_operation(hidden_states, (0, 1, 0, 1), mode="constant", value=0)
 
         hidden_states = self.conv(hidden_states, memory_state=memory_state)
         return hidden_states
