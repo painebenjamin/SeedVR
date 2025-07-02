@@ -30,6 +30,7 @@ from einops import rearrange
 
 from common.distributed.advanced import get_sequence_parallel_world_size
 from common.logger import get_logger
+from common.utils import safe_pad_operation, safe_interpolate_operation
 from models.video_vae_v3.modules.causal_inflation_lib import (
     InflatedCausalConv3d,
     causal_norm_wrapper,
@@ -226,7 +227,7 @@ class Downsample3D(Downsample2D):
 
         if self.use_conv and self.padding == 0 and self.spatial_down:
             pad = (0, 1, 0, 1)
-            hidden_states = F.pad(hidden_states, pad, mode="constant", value=0)
+            hidden_states = safe_pad_operation(hidden_states, pad, mode="constant", value=0)
 
         assert hidden_states.shape[1] == self.channels
 
@@ -808,7 +809,7 @@ class Encoder3D(nn.Module):
                     create_custom_forward(down_block), sample, memory_state, use_reentrant=False
                 )
                 if extra_block is not None:
-                    sample = sample + F.interpolate(extra_block(extra_cond), size=sample.shape[2:])
+                    sample = sample + safe_interpolate_operation(extra_block(extra_cond), size=sample.shape[2:])
 
             # middle
             sample = self.mid_block(sample, memory_state=memory_state)
@@ -823,7 +824,7 @@ class Encoder3D(nn.Module):
             for down_block, extra_block in zip(self.down_blocks, self.conv_extra_cond):
                 sample = down_block(sample, memory_state=memory_state)
                 if extra_block is not None:
-                    sample = sample + F.interpolate(extra_block(extra_cond), size=sample.shape[2:])
+                    sample = sample + safe_interpolate_operation(extra_block(extra_cond), size=sample.shape[2:])
 
             # middle
             sample = self.mid_block(sample, memory_state=memory_state)

@@ -30,6 +30,7 @@ from common.distributed.advanced import (
     get_sequence_parallel_rank,
     get_sequence_parallel_world_size,
 )
+from common.utils import safe_pad_operation
 from common.logger import get_logger
 from models.video_vae_v3.modules.context_parallel_lib import cache_send_recv, get_cache_size
 from models.video_vae_v3.modules.global_config import get_norm_limit
@@ -97,7 +98,7 @@ class InflatedCausalConv3d(Conv3d):
         if memory_occupy < self.memory_limit or split_dim == x.ndim:
             if prev_cache is not None:
                 x = torch.cat([prev_cache, x], dim=split_dim - 1)
-            x = F.pad(x, padding, value=0.0)
+            x = safe_pad_operation(x, padding, value=0.0)
             with ignore_padding(self):
                 return super().forward(x)
 

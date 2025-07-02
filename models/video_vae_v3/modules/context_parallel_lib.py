@@ -28,6 +28,7 @@ from common.distributed.advanced import (
 )
 from common.distributed.ops import Gather
 from common.logger import get_logger
+from common.utils import safe_pad_operation
 from models.video_vae_v3.modules.types import MemoryState
 
 logger = get_logger(__name__)
@@ -74,7 +75,7 @@ def causal_conv_gather_outputs(x):
 
     # Padding to max_len for gather.
     max_len = unpad_lens.max()
-    x_pad = F.pad(x, (0, 0, 0, 0, 0, max_len - x.size(2))).contiguous()
+    x_pad = safe_pad_operation(x, (0, 0, 0, 0, 0, max_len - x.size(2))).contiguous()
 
     # Gather outputs.
     x_pad = Gather.apply(sp_group, x_pad, 2, True)

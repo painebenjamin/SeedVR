@@ -20,7 +20,7 @@ from torch.nn import functional as F
 # from ..cache import Cache
 from common.cache import Cache
 from common.distributed.ops import gather_heads_scatter_seq, gather_seq_scatter_heads_qkv
-
+from common.utils import safe_pad_operation
 from .. import na
 from ..attention import FlashAttentionVarlen
 from ..blocks.mmdit_window_block import MMWindowAttention, MMWindowTransformerBlock
@@ -131,10 +131,10 @@ class NaSwinAttention(MMWindowAttention):
             k=concat_win(vid_k, txt_k).bfloat16(),
             v=concat_win(vid_v, txt_v).bfloat16(),
             cu_seqlens_q=cache_win(
-                "vid_seqlens_q", lambda: F.pad(all_len_win.cumsum(0), (1, 0)).int()
+                "vid_seqlens_q", lambda: safe_pad_operation(all_len_win.cumsum(0), (1, 0)).int()
             ),
             cu_seqlens_k=cache_win(
-                "vid_seqlens_k", lambda: F.pad(all_len_win.cumsum(0), (1, 0)).int()
+                "vid_seqlens_k", lambda: safe_pad_operation(all_len_win.cumsum(0), (1, 0)).int()
             ),
             max_seqlen_q=cache_win("vid_max_seqlen_q", lambda: all_len_win.max().item()),
             max_seqlen_k=cache_win("vid_max_seqlen_k", lambda: all_len_win.max().item()),
