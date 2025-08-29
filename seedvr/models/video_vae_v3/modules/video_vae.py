@@ -18,21 +18,21 @@ import torch.nn.functional as F
 from diffusers.models.autoencoders.vae import DiagonalGaussianDistribution
 from einops import rearrange
 
-from common.distributed.advanced import get_sequence_parallel_world_size
-from common.logger import get_logger
-from common.utils import safe_pad_operation
-from models.video_vae_v3.modules.causal_inflation_lib import (
+from seedvr.common.distributed.advanced import get_sequence_parallel_world_size
+from seedvr.common.logger import get_logger
+from seedvr.common.utils import safe_pad_operation
+from seedvr.models.video_vae_v3.modules.causal_inflation_lib import (
     InflatedCausalConv3d,
     causal_norm_wrapper,
     init_causal_conv3d,
     remove_head,
 )
-from models.video_vae_v3.modules.context_parallel_lib import (
+from seedvr.models.video_vae_v3.modules.context_parallel_lib import (
     causal_conv_gather_outputs,
     causal_conv_slice_inputs,
 )
-from models.video_vae_v3.modules.global_config import set_norm_limit
-from models.video_vae_v3.modules.types import (
+from seedvr.models.video_vae_v3.modules.global_config import set_norm_limit
+from seedvr.models.video_vae_v3.modules.types import (
     CausalAutoencoderOutput,
     CausalDecoderOutput,
     CausalEncoderOutput,

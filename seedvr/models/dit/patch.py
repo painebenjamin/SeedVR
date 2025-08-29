@@ -18,8 +18,8 @@ from einops import rearrange
 from torch import nn
 from torch.nn.modules.utils import _triple
 
-from common.cache import Cache
-from common.distributed.ops import gather_outputs, slice_inputs
+from seedvr.common.cache import Cache
+from seedvr.common.distributed.ops import gather_outputs, slice_inputs
 
 from . import na
 

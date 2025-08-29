@@ -18,18 +18,18 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch import Tensor
 
-from common.distributed import get_device
-from common.distributed.advanced import (
+from seedvr.common.distributed import get_device
+from seedvr.common.distributed.advanced import (
     get_next_sequence_parallel_rank,
     get_prev_sequence_parallel_rank,
     get_sequence_parallel_group,
     get_sequence_parallel_rank,
     get_sequence_parallel_world_size,
 )
-from common.distributed.ops import Gather
-from common.logger import get_logger
-from common.utils import safe_pad_operation
-from models.video_vae_v3.modules.types import MemoryState
+from seedvr.common.distributed.ops import Gather
+from seedvr.common.logger import get_logger
+from seedvr.common.utils import safe_pad_operation
+from seedvr.models.video_vae_v3.modules.types import MemoryState
 
 logger = get_logger(__name__)
 

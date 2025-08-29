@@ -20,7 +20,7 @@ import logging
 import sys
 from typing import Optional
 
-from common.distributed import get_global_rank, get_local_rank, get_world_size
+from seedvr.common.distributed import get_global_rank, get_local_rank, get_world_size
 
 _default_handler = logging.StreamHandler(sys.stdout)
 _default_handler.setFormatter(

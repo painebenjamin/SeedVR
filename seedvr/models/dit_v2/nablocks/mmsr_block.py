@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 
 # from ..cache import Cache
-from common.cache import Cache
+from seedvr.common.cache import Cache
 
 from .attention.mmattn import NaSwinAttention
 from ..mm import MMArg

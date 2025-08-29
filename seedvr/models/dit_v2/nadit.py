@@ -17,8 +17,8 @@ from typing import List, Optional, Tuple, Union, Callable
 import torch
 from torch import nn
 
-from common.cache import Cache
-from common.distributed.ops import slice_inputs
+from seedvr.common.cache import Cache
+from seedvr.common.distributed.ops import slice_inputs
 
 from . import na
 from .embedding import TimeEmbedding

@@ -23,18 +23,18 @@ from einops import rearrange
 from torch import Tensor, nn
 from torch.nn import Conv3d
 
-from common.distributed.advanced import (
+from seedvr.common.distributed.advanced import (
     get_next_sequence_parallel_rank,
     get_prev_sequence_parallel_rank,
     get_sequence_parallel_group,
     get_sequence_parallel_rank,
     get_sequence_parallel_world_size,
 )
-from common.utils import safe_pad_operation
-from common.logger import get_logger
-from models.video_vae_v3.modules.context_parallel_lib import cache_send_recv, get_cache_size
-from models.video_vae_v3.modules.global_config import get_norm_limit
-from models.video_vae_v3.modules.types import MemoryState, _inflation_mode_t, _memory_device_t
+from seedvr.common.utils import safe_pad_operation
+from seedvr.common.logger import get_logger
+from seedvr.models.video_vae_v3.modules.context_parallel_lib import cache_send_recv, get_cache_size
+from seedvr.models.video_vae_v3.modules.global_config import get_norm_limit
+from seedvr.models.video_vae_v3.modules.types import MemoryState, _inflation_mode_t, _memory_device_t
 
 logger = get_logger(__name__)
 

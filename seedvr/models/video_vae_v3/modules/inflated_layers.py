@@ -17,7 +17,7 @@ from typing import Literal, Optional
 from torch import Tensor
 from torch.nn import Conv3d
 
-from models.video_vae_v3.modules.inflated_lib import (
+from seedvr.models.video_vae_v3.modules.inflated_lib import (
     MemoryState,
     extend_head,
     inflate_bias,

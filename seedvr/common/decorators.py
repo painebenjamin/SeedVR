@@ -22,8 +22,8 @@ import time
 from typing import Callable
 import torch
 
-from common.distributed import barrier_if_distributed, get_global_rank, get_local_rank
-from common.logger import get_logger
+from seedvr.common.distributed import barrier_if_distributed, get_global_rank, get_local_rank
+from seedvr.common.logger import get_logger
 
 logger = get_logger(__name__)
 

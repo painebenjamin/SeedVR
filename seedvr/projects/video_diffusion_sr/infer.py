@@ -18,25 +18,25 @@ from einops import rearrange
 from omegaconf import DictConfig, ListConfig
 from torch import Tensor
 
-from common.config import create_object
-from common.decorators import log_on_entry, log_runtime
-from common.diffusion import (
+from seedvr.common.config import create_object
+from seedvr.common.decorators import log_on_entry, log_runtime
+from seedvr.common.diffusion import (
     classifier_free_guidance_dispatcher,
     create_sampler_from_config,
     create_sampling_timesteps_from_config,
     create_schedule_from_config,
 )
-from common.distributed import (
+from seedvr.common.distributed import (
     get_device,
     get_global_rank,
 )
 
-from common.distributed.meta_init_utils import (
+from seedvr.common.distributed.meta_init_utils import (
     meta_non_persistent_buffer_init_fn,
 )
 # from common.fs import download
 
-from models.dit_v2 import na
+from seedvr.models.dit_v2 import na
 
 class VideoDiffusionInfer():
     def __init__(self, config: DictConfig):

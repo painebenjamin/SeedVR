@@ -22,8 +22,8 @@ import torch
 import torch.distributed as dist
 from torch import Tensor
 
-from common.cache import Cache
-from common.distributed.advanced import (
+from seedvr.common.cache import Cache
+from seedvr.common.distributed.advanced import (
     get_sequence_parallel_group,
     get_sequence_parallel_rank,
     get_sequence_parallel_world_size,

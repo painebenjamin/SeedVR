@@ -25,16 +25,17 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from omegaconf import DictConfig
 
-from common.distributed import get_global_rank, get_world_size
-from common.fs import copy, exists, listdir, mkdir, remove
-from common.partition import partition_by_groups
-from common.persistence.utils import get_local_path
-from data.common.parquet_sampler import (
+# NOTE DOES THESE EXIST???
+from seedvr.common.distributed import get_global_rank, get_world_size
+from seedvr.common.fs import copy, exists, listdir, mkdir, remove
+from seedvr.common.partition import partition_by_groups
+from seedvr.common.persistence.utils import get_local_path
+from seedvr.data.common.parquet_sampler import (
     IdentityParquetSampler,
     ParquetSampler,
     create_parquet_sampler,
 )
-from data.common.utils import filter_parquets, get_parquet_metadata
+from seedvr.data.common.utils import filter_parquets, get_parquet_metadata
 
 
 # Function to save a Parquet file and copy it to a target path

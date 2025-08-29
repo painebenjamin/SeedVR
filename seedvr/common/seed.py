@@ -17,7 +17,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from common.distributed import get_global_rank
+from seedvr.common.distributed import get_global_rank
 
 
 def set_seed(seed: Optional[int], same_across_ranks: bool = False):

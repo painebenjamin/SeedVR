@@ -18,9 +18,9 @@ from einops import rearrange
 from torch.nn import functional as F
 
 # from ..cache import Cache
-from common.cache import Cache
-from common.distributed.ops import gather_heads_scatter_seq, gather_seq_scatter_heads_qkv
-from common.utils import safe_pad_operation
+from seedvr.common.cache import Cache
+from seedvr.common.distributed.ops import gather_heads_scatter_seq, gather_seq_scatter_heads_qkv
+from seedvr.common.utils import safe_pad_operation
 from .. import na
 from ..attention import FlashAttentionVarlen
 from ..blocks.mmdit_window_block import MMWindowAttention, MMWindowTransformerBlock

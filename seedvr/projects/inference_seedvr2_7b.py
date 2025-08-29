@@ -17,32 +17,29 @@ import torch
 import mediapy
 from einops import rearrange
 from omegaconf import OmegaConf
-print(os.getcwd())
+
 import datetime
 from tqdm import tqdm
-from models.dit import na
+from seedvr.models.dit import na
 import gc
 
-from data.image.transforms.divisible_crop import DivisibleCrop
-from data.image.transforms.na_resize import NaResize
-from data.video.transforms.rearrange import Rearrange
-if os.path.exists("./projects/video_diffusion_sr/color_fix.py"):
-    from projects.video_diffusion_sr.color_fix import wavelet_reconstruction
-    use_colorfix=True
-else:
-    use_colorfix = False
-    print('Note!!!!!! Color fix is not avaliable!')
+from seedvr.data.image.transforms.divisible_crop import DivisibleCrop
+from seedvr.data.image.transforms.na_resize import NaResize
+from seedvr.data.video.transforms.rearrange import Rearrange
+
+from projects.video_diffusion_sr.color_fix import wavelet_reconstruction
+
 from torchvision.transforms import Compose, Lambda, Normalize
 from torchvision.io.video import read_video
 from torchvision.io import read_image
 
 
-from common.distributed import (
+from seedvr.common.distributed import (
     get_device,
     init_torch,
 )
 
-from common.distributed.advanced import (
+from seedvr.common.distributed.advanced import (
     get_data_parallel_rank,
     get_data_parallel_world_size,
     get_sequence_parallel_rank,
@@ -50,11 +47,11 @@ from common.distributed.advanced import (
     init_sequence_parallel,
 )
 
-from projects.video_diffusion_sr.infer import VideoDiffusionInfer
-from common.config import load_config
-from common.distributed.ops import sync_data
-from common.seed import set_seed
-from common.partition import partition_by_groups, partition_by_size
+from seedvr.projects.video_diffusion_sr.infer import VideoDiffusionInfer
+from seedvr.common.config import load_config
+from seedvr.common.distributed.ops import sync_data
+from seedvr.common.seed import set_seed
+from seedvr.common.partition import partition_by_groups, partition_by_size
 import argparse
 
 def configure_sequence_parallel(sp_size):
@@ -298,7 +295,7 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                     if input.ndim == 3
                     else rearrange(input, "c t h w -> t c h w")
                 )
-                if use_colorfix:
+                if True:
                     sample = wavelet_reconstruction(
                         sample.to("cpu"), input[: sample.size(0)].to("cpu")
                     )

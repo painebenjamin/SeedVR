@@ -17,8 +17,8 @@ import torch
 from einops import rearrange
 from torch import nn
 
-from common.cache import Cache
-from common.distributed.ops import slice_inputs
+from seedvr.common.cache import Cache
+from seedvr.common.distributed.ops import slice_inputs
 
 # (dim: int, emb_dim: int)
 ada_layer_type = Callable[[int, int], nn.Module]
