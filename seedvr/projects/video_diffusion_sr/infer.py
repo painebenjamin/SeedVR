@@ -19,7 +19,7 @@ from omegaconf import DictConfig, ListConfig
 from torch import Tensor
 
 from seedvr.common.config import create_object
-from seedvr.common.decorators import log_on_entry, log_runtime
+from seedvr.common.decorators import log_on_entry
 from seedvr.common.diffusion import (
     classifier_free_guidance_dispatcher,
     create_sampler_from_config,
@@ -69,7 +69,6 @@ class VideoDiffusionInfer():
         raise NotImplementedError
 
     @log_on_entry
-    @log_runtime
     def configure_dit_model(self, device="cpu", checkpoint=None):
         # Load dit checkpoint.
         # For fast init & resume,
@@ -94,7 +93,6 @@ class VideoDiffusionInfer():
         print(f"DiT trainable parameters: {num_params:,}")
 
     @log_on_entry
-    @log_runtime
     def configure_vae_model(self, device: str, checkpoint: str):
         # Create vae model.
         dtype = getattr(torch, self.config.vae.dtype)
