@@ -1,5 +1,5 @@
 __object__:
-  path: models.video_vae_v3.modules.attn_video_vae
+  path: seedvr.models.video_vae_v3.modules.attn_video_vae
   name: VideoAutoencoderKLWrapper
   args: as_params
 
