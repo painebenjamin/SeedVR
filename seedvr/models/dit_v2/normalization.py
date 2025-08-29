@@ -15,9 +15,95 @@
 from typing import Callable, Optional
 from diffusers.models.normalization import RMSNorm
 from torch import nn
+import torch
+import torch.nn.functional as F
+import numbers
+from torch.nn.parameter import Parameter
+from torch.nn import init
 
 # (dim: int, eps: float, elementwise_affine: bool)
 norm_layer_type = Callable[[int, float, bool], nn.Module]
+
+
+class CustomLayerNorm(nn.Module):
+    """
+    Custom LayerNorm implementation to replace Apex FusedLayerNorm
+    """
+    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
+        super(CustomLayerNorm, self).__init__()
+        
+        if isinstance(normalized_shape, numbers.Integral):
+            normalized_shape = (normalized_shape,)
+        self.normalized_shape = torch.Size(normalized_shape)
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        
+        if self.elementwise_affine:
+            self.weight = Parameter(torch.Tensor(*normalized_shape))
+            self.bias = Parameter(torch.Tensor(*normalized_shape))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.elementwise_affine:
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
+
+    def forward(self, input):
+        # 🚀 FP8 COMPATIBILITY: Convert parameters to match input dtype
+        # This prevents "Promotion for Float8 Types is not supported" errors
+        weight = self.weight
+        bias = self.bias
+        
+        if self.elementwise_affine and weight is not None:
+            if weight.dtype != input.dtype:
+                weight = weight.to(input.dtype)
+            if bias is not None and bias.dtype != input.dtype:
+                bias = bias.to(input.dtype)
+        
+        return F.layer_norm(
+            input, self.normalized_shape, weight, bias, self.eps)
+
+
+class CustomRMSNorm(nn.Module):
+    """
+    Custom RMSNorm implementation to replace Apex FusedRMSNorm
+    """
+    def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
+        super(CustomRMSNorm, self).__init__()
+        
+        if isinstance(normalized_shape, numbers.Integral):
+            normalized_shape = (normalized_shape,)
+        self.normalized_shape = torch.Size(normalized_shape)
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        
+        if self.elementwise_affine:
+            self.weight = Parameter(torch.ones(*normalized_shape))
+        else:
+            self.register_parameter('weight', None)
+
+    def forward(self, input):
+        # RMS normalization: x / sqrt(mean(x^2) + eps) * weight
+        dims = tuple(range(-len(self.normalized_shape), 0))
+        
+        # Calculate RMS: sqrt(mean(x^2))
+        variance = input.pow(2).mean(dim=dims, keepdim=True)
+        rms = torch.sqrt(variance + self.eps)
+        
+        # Normalize
+        normalized = input / rms
+        
+        if self.elementwise_affine:
+            # 🚀 FP8 COMPATIBILITY: Convert weight to match normalized dtype
+            # This prevents "Promotion for Float8 Types is not supported" errors
+            weight = self.weight
+            if weight.dtype != normalized.dtype:
+                weight = weight.to(normalized.dtype)
+            return normalized * weight
+        return normalized
 
 
 def get_norm_layer(norm_type: Optional[str]) -> norm_layer_type:
@@ -41,18 +127,16 @@ def get_norm_layer(norm_type: Optional[str]) -> norm_layer_type:
             )
 
         if norm_type == "fusedln":
-            from apex.normalization import FusedLayerNorm
-
-            return FusedLayerNorm(
+            # Use custom LayerNorm instead of Apex FusedLayerNorm
+            return CustomLayerNorm(
                 normalized_shape=dim,
                 elementwise_affine=elementwise_affine,
                 eps=eps,
             )
 
         if norm_type == "fusedrms":
-            from apex.normalization import FusedRMSNorm
-
-            return FusedRMSNorm(
+            # Use custom RMSNorm instead of Apex FusedRMSNorm
+            return CustomRMSNorm(
                 normalized_shape=dim,
                 elementwise_affine=elementwise_affine,
                 eps=eps,
