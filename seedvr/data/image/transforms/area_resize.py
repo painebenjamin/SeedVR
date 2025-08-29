@@ -56,8 +56,7 @@ class AreaResize:
     
 def area_resize (
     image: Union[torch.Tensor, Image.Image],
-    max_area: float,
-    downsample_only: bool = False,
+    scale: int,
     interpolation: InterpolationMode = InterpolationMode.BICUBIC,
 ):
     if isinstance(image, torch.Tensor):
@@ -66,11 +65,6 @@ def area_resize (
         width, height = image.size
     else:
         raise NotImplementedError
-
-    scale = math.sqrt(max_area / (height * width))
-
-    # keep original height and width for small pictures.
-    scale = 1 if scale >= 1 and downsample_only else scale
 
     resized_height, resized_width = round(height * scale), round(width * scale)
 
