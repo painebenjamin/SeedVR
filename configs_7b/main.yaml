@@ -1,11 +1,11 @@
 __object__:
-  path: projects.video_diffusion_sr.train
+  path: seedvr.projects.video_diffusion_sr.train
   name: VideoDiffusionTrainer
 
 dit:
   model:
     __object__:
-      path: models.dit.nadit
+      path: seedvr.models.dit.nadit
       name: NaDiT
       args: as_params
     vid_in_channels: 33
@@ -41,7 +41,7 @@ ema:
 
 vae:
   model:
-    __inherit__: models/video_vae_v3/s8_c16_t4_inflation_sd3.yaml
+    __inherit__: seedvr/models/video_vae_v3/s8_c16_t4_inflation_sd3.yaml
     freeze_encoder: False
     # gradient_checkpoint: True
   slicing:
