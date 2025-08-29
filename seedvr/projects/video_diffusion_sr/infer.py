@@ -75,25 +75,19 @@ class VideoDiffusionInfer():
         # For fast init & resume,
         #   when training from scratch, rank0 init DiT on cpu, then sync to other ranks with FSDP.
         #   otherwise, all ranks init DiT on meta device, then load_state_dict with assign=True.
-        if self.config.dit.get("init_with_meta_device", False):
-            init_device = "cpu" if get_global_rank() == 0 and checkpoint is None else "meta"
-        else:
-            init_device = "cpu"
-
         # Create dit model.
-        with torch.device(init_device):
+        with torch.device(device):
             self.dit = create_object(self.config.dit.model)
         self.dit.set_gradient_checkpointing(self.config.dit.gradient_checkpoint)
 
         if checkpoint:
-            state = torch.load(checkpoint, map_location="cpu", mmap=True)
+            state = torch.load(checkpoint, map_location=device)
             loading_info = self.dit.load_state_dict(state, strict=True, assign=True)
             print(f"Loading pretrained ckpt from {checkpoint}")
             print(f"Loading info: {loading_info}")
             self.dit = meta_non_persistent_buffer_init_fn(self.dit)
 
-        if device in [get_device(), "cuda"]:
-            self.dit.to(get_device())
+        self.dit.to(device)
 
         # Print model size.
         num_params = sum(p.numel() for p in self.dit.parameters() if p.requires_grad)
@@ -110,7 +104,7 @@ class VideoDiffusionInfer():
 
         # Load vae checkpoint.
         state = torch.load(
-            checkpoint, map_location=device, mmap=True
+            checkpoint, map_location=device
         )
         self.vae.load_state_dict(state)
 
