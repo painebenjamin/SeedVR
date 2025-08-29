@@ -53,6 +53,32 @@ class AreaResize:
             size=(resized_height, resized_width),
             interpolation=self.interpolation,
         )
+    
+def area_resize (
+    image: Union[torch.Tensor, Image.Image],
+    max_area: float,
+    downsample_only: bool = False,
+    interpolation: InterpolationMode = InterpolationMode.BICUBIC,
+):
+    if isinstance(image, torch.Tensor):
+        height, width = image.shape[-2:]
+    elif isinstance(image, Image.Image):
+        width, height = image.size
+    else:
+        raise NotImplementedError
+
+    scale = math.sqrt(max_area / (height * width))
+
+    # keep original height and width for small pictures.
+    scale = 1 if scale >= 1 and downsample_only else scale
+
+    resized_height, resized_width = round(height * scale), round(width * scale)
+
+    return TVF.resize(
+        image,
+        size=(resized_height, resized_width),
+        interpolation=interpolation,
+    )
 
 
 class AreaRandomCrop:
