@@ -101,16 +101,16 @@ class VideoDiffusionInfer():
 
     @log_on_entry
     @log_runtime
-    def configure_vae_model(self):
+    def configure_vae_model(self, device: str, checkpoint: str):
         # Create vae model.
         dtype = getattr(torch, self.config.vae.dtype)
         self.vae = create_object(self.config.vae.model)
         self.vae.requires_grad_(False).eval()
-        self.vae.to(device=get_device(), dtype=dtype)
+        self.vae.to(device=device, dtype=dtype)
 
         # Load vae checkpoint.
         state = torch.load(
-            self.config.vae.checkpoint, map_location=get_device(), mmap=True
+            checkpoint, map_location=device, mmap=True
         )
         self.vae.load_state_dict(state)
 
