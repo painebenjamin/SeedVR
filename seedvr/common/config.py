@@ -19,11 +19,13 @@ Configuration utility functions
 import importlib
 from typing import Any, Callable, List, Union
 from omegaconf import DictConfig, ListConfig, OmegaConf
+from functools import partial
+import os
 
 OmegaConf.register_new_resolver("eval", eval)
 
 
-def load_config(path: str, argv: List[str] = None) -> Union[DictConfig, ListConfig]:
+def load_config(path: str, argv: List[str] = None, root_dir: str | None = None) -> Union[DictConfig, ListConfig]:
     """
     Load a configuration. Will resolve inheritance.
     """
@@ -31,7 +33,8 @@ def load_config(path: str, argv: List[str] = None) -> Union[DictConfig, ListConf
     if argv is not None:
         config_argv = OmegaConf.from_dotlist(argv)
         config = OmegaConf.merge(config, config_argv)
-    config = resolve_recursive(config, resolve_inheritance)
+    resolve_inheritance_fn = partial(resolve_inheritance, root_dir=root_dir)
+    config = resolve_recursive(config, resolve_inheritance_fn)
     return config
 
 
@@ -53,7 +56,7 @@ def resolve_recursive(
     return config
 
 
-def resolve_inheritance(config: Union[DictConfig, ListConfig]) -> Any:
+def resolve_inheritance(config: Union[DictConfig, ListConfig], root_dir: str | None = None) -> Any:
     """
     Recursively resolve inheritance if the config contains:
     __inherit__: path/to/parent.yaml or a ListConfig of such paths.
@@ -67,6 +70,9 @@ def resolve_inheritance(config: Union[DictConfig, ListConfig]) -> Any:
             parent_config = None
             for parent_path in inherit_list:
                 assert isinstance(parent_path, str)
+                if root_dir is not None:
+                    parent_path = os.path.join(root_dir, parent_path)
+
                 parent_config = (
                     load_config(parent_path)
                     if parent_config is None
