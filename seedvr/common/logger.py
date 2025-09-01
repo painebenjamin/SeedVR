@@ -40,5 +40,4 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
     logger = logging.getLogger(name)
     logger.addHandler(_default_handler)
-    logger.setLevel(logging.INFO)
     return logger
