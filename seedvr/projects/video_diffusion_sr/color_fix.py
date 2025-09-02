@@ -5,6 +5,16 @@ from torch.nn import functional as F
 from seedvr.common.half_precision_fixes import safe_pad_operation, safe_interpolate_operation
 from torchvision.transforms import ToTensor, ToPILImage
 
+def get_wavelet_kernel (in_dtype, in_device):
+    # convolution kernel
+    kernel_vals = [
+        [0.0625, 0.125, 0.0625],
+        [0.125, 0.25, 0.125],
+        [0.0625, 0.125, 0.0625],
+    ]
+    wavelet_kernel = torch.tensor(kernel_vals, dtype=in_dtype).to(device=in_device, pin_memory=True, non_blocking=True)
+    return wavelet_kernel
+
 def adain_color_fix(target: Image, source: Image):
     # Convert images to tensors
     to_tensor = ToTensor()
@@ -64,18 +74,11 @@ def adaptive_instance_normalization(content_feat:Tensor, style_feat:Tensor):
     normalized_feat = (content_feat - content_mean.expand(size)) / content_std.expand(size)
     return normalized_feat * style_std.expand(size) + style_mean.expand(size)
 
-def wavelet_blur(image: Tensor, radius: int):
+def wavelet_blur(image: Tensor, radius: int, kernel: Tensor):
     """
     Apply wavelet blur to the input tensor.
     """
     # input shape: (1, 3, H, W)
-    # convolution kernel
-    kernel_vals = [
-        [0.0625, 0.125, 0.0625],
-        [0.125, 0.25, 0.125],
-        [0.0625, 0.125, 0.0625],
-    ]
-    kernel = torch.tensor(kernel_vals, dtype=image.dtype, device=image.device)
     # add channel dimensions to the kernel to make it a 4D tensor
     kernel = kernel[None, None]
     # repeat the kernel across all input channels
@@ -85,7 +88,7 @@ def wavelet_blur(image: Tensor, radius: int):
     output = F.conv2d(image, kernel, groups=3, dilation=radius)
     return output
 
-def wavelet_decomposition(image: Tensor, levels=5):
+def wavelet_decomposition(image: Tensor, kernel: torch.Tensor, levels=5,):
     """
     Apply wavelet decomposition to the input tensor.
     This function only returns the low frequency & the high frequency.
@@ -93,21 +96,19 @@ def wavelet_decomposition(image: Tensor, levels=5):
     high_freq = torch.zeros_like(image)
     for i in range(levels):
         radius = 2 ** i
-        low_freq = wavelet_blur(image, radius)
+        low_freq = wavelet_blur(image, radius, kernel=kernel)
         high_freq += (image - low_freq)
         image = low_freq
 
     return high_freq, low_freq
 
 
-
-def wavelet_reconstruction(content_feat:Tensor, style_feat:Tensor):
+def wavelet_reconstruction(content_feat:Tensor, style_feat:Tensor, wavelet_kernel:Tensor):
     """
     Apply wavelet decomposition, so that the content will have the same color as the style.
     """
     # Vérifier et ajuster les dimensions si nécessaire
     if content_feat.shape != style_feat.shape:
-        print(f"⚠️ Dimension mismatch détectée: content {content_feat.shape} vs style {style_feat.shape}")
         
         # Redimensionner style_feat pour correspondre à content_feat
         target_shape = content_feat.shape
@@ -119,18 +120,15 @@ def wavelet_reconstruction(content_feat:Tensor, style_feat:Tensor):
                 mode='bilinear', 
                 align_corners=False
             )
-            print(f"✅ Style redimensionné vers: {style_feat.shape}")
-    
+
     # calculate the wavelet decomposition of the content feature
-    content_high_freq, content_low_freq = wavelet_decomposition(content_feat)
+    content_high_freq, content_low_freq = wavelet_decomposition(content_feat, wavelet_kernel)
     del content_low_freq
     # calculate the wavelet decomposition of the style feature
-    style_high_freq, style_low_freq = wavelet_decomposition(style_feat)
+    style_high_freq, style_low_freq = wavelet_decomposition(style_feat, wavelet_kernel)
     del style_high_freq
     
-    # Vérification finale avant addition
     if content_high_freq.shape != style_low_freq.shape:
-        print(f"⚠️ Ajustement final nécessaire: {content_high_freq.shape} vs {style_low_freq.shape}")
         style_low_freq = safe_interpolate_operation(
             style_low_freq,
             size=content_high_freq.shape[-2:],
