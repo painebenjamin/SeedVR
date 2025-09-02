@@ -12,7 +12,7 @@ def get_wavelet_kernel (in_dtype, in_device):
         [0.125, 0.25, 0.125],
         [0.0625, 0.125, 0.0625],
     ]
-    wavelet_kernel = torch.tensor(kernel_vals, dtype=in_dtype).to(device=in_device, pin_memory=True, non_blocking=True)
+    wavelet_kernel = torch.tensor(kernel_vals, dtype=in_dtype).to(device=in_device, non_blocking=True)
     return wavelet_kernel
 
 def adain_color_fix(target: Image, source: Image):
