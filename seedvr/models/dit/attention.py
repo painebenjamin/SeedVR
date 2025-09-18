@@ -15,7 +15,12 @@
 import torch
 import torch.nn.functional as F
 
-from flash_attn import flash_attn_varlen_func
+try:
+    from flash_attn_interface import flash_attn_varlen_func
+    print("Using FlashAttention3")
+except ImportError:
+    from flash_attn import flash_attn_varlen_func
+    print("Using FlashAttention2")
 
 from torch import nn
 
