@@ -31,6 +31,8 @@ from seedvr.common.distributed import (
     get_global_rank,
 )
 
+from safetensors.torch import load_file as load_file_safetensors
+
 from seedvr.common.distributed.meta_init_utils import (
     meta_non_persistent_buffer_init_fn,
 )
@@ -80,7 +82,10 @@ class VideoDiffusionInfer():
         self.dit.set_gradient_checkpointing(self.config.dit.gradient_checkpoint)
 
         if checkpoint:
-            state = torch.load(checkpoint, map_location=device)
+            if checkpoint.endswith("safetensors"):
+                state = load_file_safetensors(checkpoint, device="cuda")
+            else:
+                state = torch.load(checkpoint, map_location=device)
             loading_info = self.dit.load_state_dict(state, strict=True, assign=True)
             print(f"Loading pretrained ckpt from {checkpoint}")
             print(f"Loading info: {loading_info}")
@@ -101,9 +106,10 @@ class VideoDiffusionInfer():
         self.vae.to(device=device, dtype=dtype)
 
         # Load vae checkpoint.
-        state = torch.load(
-            checkpoint, map_location=device
-        )
+        if checkpoint.endswith("safetensors"):
+            state = load_file_safetensors(checkpoint, device="cuda")
+        else:
+            state = torch.load(checkpoint, map_location=device)
         self.vae.load_state_dict(state)
 
         # Set causal slicing.
