@@ -115,11 +115,11 @@ def get_cache_size(conv_module, input_len, pad_len, dim=0):
 
 
 def cache_send_recv(tensor: List[Tensor], cache_size, times, memory=None):
-    sp_group = get_sequence_parallel_group()
-    sp_rank = get_sequence_parallel_rank()
-    sp_size = get_sequence_parallel_world_size()
-    send_dst = get_next_sequence_parallel_rank()
-    recv_src = get_prev_sequence_parallel_rank()
+    sp_group = None #get_sequence_parallel_group()
+    sp_rank = 0 # get_sequence_parallel_rank()
+    sp_size = 1 # get_sequence_parallel_world_size()
+    send_dst = None # get_next_sequence_parallel_rank()
+    recv_src = None # get_prev_sequence_parallel_rank()
     recv_buffer = None
     recv_req = None
 

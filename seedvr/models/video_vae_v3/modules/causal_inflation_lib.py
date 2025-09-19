@@ -218,11 +218,11 @@ class InflatedCausalConv3d(Conv3d):
         #                  sp0                  sp1
         # slice 0: [`0 0` 0 1 2 {3 4}]   [{3 4} 5 6 (7 8)]    extend=`0 0` cache={3 4} memory=(7 8)
         # slice 1: [(7 8) 9 10 {11 12}]  [{11 12} 13 14 15 16]
-        sp_rank = get_sequence_parallel_rank()
-        sp_size = get_sequence_parallel_world_size()
-        sp_group = get_sequence_parallel_group()
-        send_dst = get_next_sequence_parallel_rank()
-        recv_src = get_prev_sequence_parallel_rank()
+        sp_rank = 0 # get_sequence_parallel_rank()
+        sp_size = 1 # get_sequence_parallel_world_size()
+        sp_group = None # get_sequence_parallel_group()
+        send_dst = None #get_next_sequence_parallel_rank()
+        recv_src = None #get_prev_sequence_parallel_rank()
         if (
             memory_state in [MemoryState.INITIALIZING, MemoryState.ACTIVE]  # use_slicing
             and not self.training
