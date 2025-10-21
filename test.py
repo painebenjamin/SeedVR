@@ -13,6 +13,7 @@ image = image.to(torch.float32) / 255.0  # [0, 1]
 image = image * 2.0 - 1.0  # normalize to [-1, 1]
 
 #pipeline = SeedVRPipeline.from_original_pretrained(device="cuda")
+#pipeline.dit.to(torch.bfloat16)
 #pipeline.save_pretrained_flashpack("SeedVR2-7B-FlashPack")
 pipeline = SeedVRPipeline.from_pretrained_flashpack("./SeedVR2-7B-FlashPack", device="cuda")
 samples = pipeline(

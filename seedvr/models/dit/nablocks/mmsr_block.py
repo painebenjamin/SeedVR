@@ -20,7 +20,7 @@ from torch.nn import functional as F
 # from ..cache import Cache
 from seedvr.common.cache import Cache
 from seedvr.common.distributed.ops import gather_heads_scatter_seq, gather_seq_scatter_heads_qkv
-from seedvr.common.utils import safe_pad_operation
+from seedvr.common.utils import safe_pad_operation, get_torch_dtype
 from .. import na
 from ..attention import FlashAttentionVarlen
 from ..blocks.mmdit_window_block import MMWindowAttention, MMWindowTransformerBlock
@@ -29,7 +29,6 @@ from ..modulation import ada_layer_type
 from ..normalization import norm_layer_type
 from ..rope import NaRotaryEmbedding3d
 from ..window import get_window_op
-
 
 class NaSwinAttention(MMWindowAttention):
     def __init__(
@@ -45,6 +44,7 @@ class NaSwinAttention(MMWindowAttention):
         window: Union[int, Tuple[int, int, int]],
         window_method: str,
         shared_qkv: bool,
+        dtype: Union[str, torch.dtype] = "float32",
         **kwargs,
     ):
         super().__init__(
@@ -63,6 +63,7 @@ class NaSwinAttention(MMWindowAttention):
         self.rope = NaRotaryEmbedding3d(dim=head_dim // 2) if qk_rope else None
         self.attn = FlashAttentionVarlen()
         self.window_op = get_window_op(window_method)
+        self.rope.to(get_torch_dtype(dtype))
 
     def forward(
         self,

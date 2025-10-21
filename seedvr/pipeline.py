@@ -65,7 +65,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             embeds=embeds,
         )
         self.wavelet_kernel = get_wavelet_kernel(
-            self.dit.dtype,
+            self.vae.dtype,
             in_device=self.dit.device
         )
         self.transform_timesteps = transform_timesteps
@@ -157,7 +157,6 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             # Vae process by each group.
             for sample in batches:
                 sample = sample.to(device, dtype)
-                print(f"{sample.shape=}")
                 if hasattr(self.vae, "preprocess"):
                     sample = self.vae.preprocess(sample)
                 if use_sample:
@@ -275,6 +274,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
 
         # Unflatten.
         latents = unflatten(latents, latents_shapes)
+        latents = [latent.to(self.vae.dtype) for latent in latents]
 
         if dit_offload:
             self.dit.to("cpu")
@@ -394,6 +394,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         scale = math.sqrt(target_area / media_area)
         media = area_resize(media, scale)
         latents = self.vae_encode([media])
+        latents = [latent.to(self.dit.dtype) for latent in latents]
         noises = [self.random_seeded_like(latent, generator) for latent in latents]
         aug_noises = [self.random_seeded_like(latent, generator) for latent in latents]
         conditions = [
@@ -412,7 +413,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         )
         samples = [
             wavelet_reconstruction(
-                samples[i], media[:, i].to(samples[i].device), self.wavelet_kernel
+                samples[i].to(dtype=self.wavelet_kernel.dtype),
+                media[:, i].to(samples[i].device, dtype=self.wavelet_kernel.dtype),
+                self.wavelet_kernel,
             )
             for i in range(len(samples))
         ]

@@ -18,6 +18,7 @@ import torch
 from torch import nn
 
 from seedvr.common.cache import Cache
+from seedvr.common.utils import get_torch_dtype
 from seedvr.common.distributed.ops import slice_inputs
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -75,6 +76,7 @@ class NaDiT(PretrainedMixin, FlashPackDiffusersModelMixin, ConfigMixin):
         window_method: Optional[Tuple[str]] = ("720pwin_by_size_bysize", "720pswin_by_size_bysize") * 18,
         temporal_window_size: Optional[int] = None,
         temporal_shifted: bool = False,
+        dtype: Union[str, torch.dtype] = "float32",
         **kwargs: Any,
     ) -> None:
         ada = get_ada_layer(ada)
@@ -132,6 +134,7 @@ class NaDiT(PretrainedMixin, FlashPackDiffusersModelMixin, ConfigMixin):
                     window_method=window_method[i],
                     temporal_window_size=temporal_window_size[i],
                     temporal_shifted=temporal_shifted[i],
+                    dtype=get_torch_dtype(dtype),
                     **kwargs,
                 )
                 for i in range(num_layers)
