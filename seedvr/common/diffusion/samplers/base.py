@@ -16,20 +16,20 @@
 Sampler base class.
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Literal, Union
 import torch
 from tqdm import tqdm
+from omegaconf import DictConfig
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.models.modeling_utils import ModelMixin
+from diffusers.schedulers.scheduling_utils import SchedulerMixin
 
 from ..schedules.base import Schedule
 from ..timesteps.base import SamplingTimesteps
 from ..types import PredictionType, SamplingDirection
 from ..utils import assert_schedule_timesteps_compatible
-
 
 @dataclass
 class SamplerModelArgs:
@@ -38,24 +38,34 @@ class SamplerModelArgs:
     i: int
 
 
-class Sampler(ConfigMixin, ABC):
+class Sampler(ConfigMixin, SchedulerMixin, metaclass=ABCMeta):
     """
     Samplers are ODE/SDE solvers.
     """
+    config_name = "scheduler_config.json"
 
+    @register_to_config
     def __init__(
         self,
-        schedule: Schedule,
-        timesteps: SamplingTimesteps,
-        prediction_type: PredictionType,
+        schedule_type: Literal["lerp"] = "lerp",
+        schedule_t: Union[int, float] = 1000.0,
+        timesteps_type: Literal["uniform_trailing"] = "uniform_trailing",
+        timesteps_steps: int = 1000,
+        timesteps_shift: float = 1.0,
+        prediction_type: PredictionType = PredictionType.v_lerp,
         return_endpoint: bool = True,
-    ):
-        assert_schedule_timesteps_compatible(
-            schedule=schedule,
-            timesteps=timesteps,
+        device: torch.device = torch.device("cpu"),
+    ) -> None:
+        from seedvr.common.diffusion.config import create_schedule_from_config, create_sampling_timesteps_from_config
+        self.schedule = create_schedule_from_config(
+            config=DictConfig({"type": schedule_type, "T": schedule_t}),
+            device=device,
         )
-        self.schedule = schedule
-        self.timesteps = timesteps
+        self.timesteps = create_sampling_timesteps_from_config(
+            config=DictConfig({"type": timesteps_type, "steps": timesteps_steps}),
+            schedule=self.schedule,
+            device=device,
+        )
         self.prediction_type = prediction_type
         self.return_endpoint = return_endpoint
 

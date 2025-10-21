@@ -44,7 +44,7 @@ class NaDiT(PretrainedMixin, FlashPackDiffusersModelMixin, ConfigMixin):
     """
     Native Resolution Diffusers Transformer (NaDiT)
     """
-    config_name = "config"
+    config_name = "config.json"
     gradient_checkpointing = False
 
     @register_to_config

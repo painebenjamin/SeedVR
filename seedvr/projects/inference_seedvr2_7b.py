@@ -319,8 +319,6 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                 sample = sample.clip(-1, 1).mul_(0.5).add_(0.5).mul_(255).round()
                 sample = sample.to(torch.uint8).numpy()
 
-                print(f"{sample.shape=} {sample.min()} {sample.max()}")
-
                 if sample.shape[0] == 1:
                     mediapy.write_image(filename, sample.squeeze(0))
                 else:

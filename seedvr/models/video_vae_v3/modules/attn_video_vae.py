@@ -73,7 +73,7 @@ class Upsample3D(Upsample2D):
         super().__init__(*args, **kwargs)
         conv = self.conv if self.name == "conv" else self.Conv2d_0
 
-        assert type(conv) is not nn.ConvTranspose2d
+        assert type(conv) is not nn.ConvTranspose2d, f"Unsupported conv type: {type(conv)}"
         # Note: lora_layer is not passed into constructor in the original implementation.
         # So we make a simplification.
         conv = init_causal_conv3d(
@@ -268,7 +268,7 @@ class ResnetBlock3D(ResnetBlock2D):
         )
 
         if self.up:
-            assert type(self.upsample) is Upsample2D
+            assert type(self.upsample) is Upsample3D
             self.upsample = Upsample3D(
                 self.in_channels,
                 use_conv=False,
@@ -276,7 +276,7 @@ class ResnetBlock3D(ResnetBlock2D):
                 slicing=slicing,
             )
         elif self.down:
-            assert type(self.downsample) is Downsample2D
+            assert type(self.downsample) is Downsample3D
             self.downsample = Downsample3D(
                 self.in_channels,
                 use_conv=False,
@@ -664,7 +664,7 @@ class Encoder3D(nn.Module):
             The number of input channels.
         out_channels (`int`, *optional*, defaults to 3):
             The number of output channels.
-        down_block_types (`Tuple[str, ...]`, *optional*, defaults to `("DownEncoderBlock2D",)`):
+        down_block_types (`Tuple[str, ...]`, *optional*, defaults to `("DownEncoderBlock3D",)`):
             The types of down blocks to use.
             See `~diffusers.models.unet_2d_blocks.get_down_block`
             for available options.
@@ -721,6 +721,7 @@ class Encoder3D(nn.Module):
         # down
         output_channel = block_out_channels[0]
         for i, down_block_type in enumerate(down_block_types):
+            down_block_type = down_block_type.replace("2D", "3D")
             input_channel = output_channel
             output_channel = block_out_channels[i]
             is_final_block = i == len(block_out_channels) - 1
@@ -728,7 +729,7 @@ class Encoder3D(nn.Module):
             is_temporal_down_block = i >= len(block_out_channels) - self.temporal_down_num - 1
             # Note: take the last ones
 
-            assert down_block_type == "DownEncoderBlock3D"
+            assert down_block_type == "DownEncoderBlock3D", f"Unsupported down block type: {down_block_type}"
 
             down_block = DownEncoderBlock3D(
                 num_layers=self.layers_per_block,
@@ -850,7 +851,7 @@ class Decoder3D(nn.Module):
             The number of input channels.
         out_channels (`int`, *optional*, defaults to 3):
             The number of output channels.
-        up_block_types (`Tuple[str, ...]`, *optional*, defaults to `("UpDecoderBlock2D",)`):
+        up_block_types (`Tuple[str, ...]`, *optional*, defaults to `("UpDecoderBlock3D",)`):
             The types of up blocks to use.
             See `~diffusers.models.unet_2d_blocks.get_up_block` for available options.
         block_out_channels (`Tuple[int, ...]`, *optional*, defaults to `(64,)`):
@@ -921,6 +922,7 @@ class Decoder3D(nn.Module):
         reversed_block_out_channels = list(reversed(block_out_channels))
         output_channel = reversed_block_out_channels[0]
         for i, up_block_type in enumerate(up_block_types):
+            up_block_type = up_block_type.replace("2D", "3D")
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
 
@@ -929,7 +931,7 @@ class Decoder3D(nn.Module):
             is_slicing_up_block = i >= len(block_out_channels) - slicing_up_num
             # Note: Keep symmetric
 
-            assert up_block_type == "UpDecoderBlock3D"
+            assert up_block_type == "UpDecoderBlock3D", f"Unsupported up block type: {up_block_type}"
             up_block = UpDecoderBlock3D(
                 num_layers=self.layers_per_block + 1,
                 in_channels=prev_output_channel,
@@ -1046,9 +1048,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         gradient_checkpoint: bool = False,
         inflation_mode: _inflation_mode_t = "pad",
         time_receptive_field: _receptive_field_t = "full",
-        slicing_sample_min_size: int = 32,
-        use_quant_conv: bool = True,
-        use_post_quant_conv: bool = True,
+        slicing_sample_min_size: int = 4,
+        use_quant_conv: bool = False,
+        use_post_quant_conv: bool = False,
         spatial_downsample_factor: int = 8,
         temporal_downsample_factor: int = 4,
         slicing: Dict[str, Any] = {"split_size": 4, "memory_device": "same"},
@@ -1284,9 +1286,9 @@ class VideoAutoencoderKLWrapper(PretrainedMixin, FlashPackDiffusersModelMixin, V
         gradient_checkpoint: bool = False,
         inflation_mode: _inflation_mode_t = "pad",
         time_receptive_field: _receptive_field_t = "full",
-        slicing_sample_min_size: int = 32,
-        use_quant_conv: bool = True,
-        use_post_quant_conv: bool = True,
+        slicing_sample_min_size: int = 4,
+        use_quant_conv: bool = False,
+        use_post_quant_conv: bool = False,
         spatial_downsample_factor: int = 8,
         temporal_downsample_factor: int = 4,
         slicing: Dict[str, Any] = {"split_size": 4, "memory_device": "same"},
@@ -1347,7 +1349,7 @@ class VideoAutoencoderKLWrapper(PretrainedMixin, FlashPackDiffusersModelMixin, V
 
     def preprocess(self, x: torch.Tensor):
         # x should in [B, C, T, H, W], [B, C, H, W]
-        assert x.ndim == 4 or x.size(2) % 4 == 1
+        assert x.ndim == 4 or x.size(2) % 4 == 1, f"Unsupported input shape: {x.shape}"
         return x
 
     def postprocess(self, x: torch.Tensor):

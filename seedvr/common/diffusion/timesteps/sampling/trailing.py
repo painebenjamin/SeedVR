@@ -49,6 +49,10 @@ class UniformTrailingSamplingTimesteps(SamplingTimesteps):
 
         super().__init__(T=T, timesteps=timesteps, direction=SamplingDirection.backward)
 
+    def to(self, device: torch.device = torch.device("cpu"), dtype: torch.dtype = torch.float32) -> "UniformTrailingSamplingTimesteps":
+        self.device = device
+        return self
+
     def set_timesteps(self, T: int, steps: int, shift: float = 1.0, direction: SamplingDirection | None = None, **kwargs: Any) -> None:
         """
         Set the timesteps.

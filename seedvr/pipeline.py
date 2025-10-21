@@ -1,21 +1,8 @@
-# // Copyright (c) 2025 Bytedance Ltd. and/or its affiliates
-# //
-# // Licensed under the Apache License, Version 2.0 (the "License");
-# // you may not use this file except in compliance with the License.
-# // You may obtain a copy of the License at
-# //
-# //     http://www.apache.org/licenses/LICENSE-2.0
-# //
-# // Unless required by applicable law or agreed to in writing, software
-# // distributed under the License is distributed on an "AS IS" BASIS,
-# // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# // See the License for the specific language governing permissions and
-# // limitations under the License.
-
 from typing import List, Optional, Tuple, Union, Any, Callable
 import torch
 import os
 import random
+import math
 from einops import rearrange
 from omegaconf import DictConfig, ListConfig
 from torch import Tensor
@@ -137,19 +124,13 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
 
         dit = NaDiT.from_single_file(dit_path, device=device)
         vae = VideoAutoencoderKLWrapper.from_single_file(vae_path, device=device)
-        schedule = create_schedule_from_config(
-            config=DictConfig({"type": schedule_type, "T": schedule_t}),
-            device=device,
-        )
-        sampling_timesteps = create_sampling_timesteps_from_config(
-            config=DictConfig({"type": timesteps_sampling_type, "steps": timesteps_sampling_steps}),
-            schedule=schedule,
-            device=device,
-        )
         sampler = create_sampler_from_config(
             config=DictConfig({"type": sampler_type, "prediction_type": sampler_prediction_type}),
-            schedule=schedule,
-            timesteps=sampling_timesteps,
+            schedule_type=schedule_type,
+            schedule_t=schedule_t,
+            timesteps_type=timesteps_sampling_type,
+            timesteps_steps=timesteps_sampling_steps,
+            device=device,
         )
         return cls(dit=dit, vae=vae, sampler=sampler)
 
@@ -391,27 +372,30 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         seed: int | None = None,
         batch_size: int = 1,
         temporal_overlap: int = 0,
-        cond_noise_scale: float = 0.25,
+        cond_noise_scale: float = 0.05,
     ) -> torch.Tensor:
         """
         Generate a video from a media.
         """
         assert media.ndim == 4, "Media must be in CFHW format"
-        num_frames = media.shape[0]
-        overlap = 0 if num_frames == 1 else temporal_overlap
+        c, f, h, w = media.shape
+
+        overlap = 0 if f == 1 else temporal_overlap
         step_size = batch_size - overlap
+
         if seed is None:
             seed = random.randint(0, 2**32-1)
 
         generator = torch.Generator(device=get_device()).manual_seed(seed)
 
         # TODO: Implement the video generation.
+        target_area = height * width
+        media_area = h * w
+        scale = math.sqrt(target_area / media_area)
+        media = area_resize(media, scale)
         latents = self.vae_encode([media])
-        print(f"{latents[0].shape=} {len(latents)=} {latents[0].min()} {latents[0].max()}")
         noises = [self.random_seeded_like(latent, generator) for latent in latents]
-        print(f"{noises[0].shape=} {len(noises)=} {noises[0].min()} {noises[0].max()}")
         aug_noises = [self.random_seeded_like(latent, generator) for latent in latents]
-        print(f"{aug_noises[0].shape=} {len(aug_noises)=} {aug_noises[0].min()} {aug_noises[0].max()}")
         conditions = [
             self.get_condition(
                 noise,
@@ -420,20 +404,20 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             )
             for noise, aug_noise, latent in zip(noises, aug_noises, latents)
         ]
-        print(f"{conditions[0].shape=} {len(conditions)=} {conditions[0].min()} {conditions[0].max()}")
         samples = self.inference(
             noises,
             conditions,
             cfg_scale,
             cfg_rescale,
         )
-        print(f"{samples[0]=}")
-        """
         samples = [
             wavelet_reconstruction(
                 samples[i], media[:, i].to(samples[i].device), self.wavelet_kernel
             )
             for i in range(len(samples))
         ]
-        """
+        samples = [
+            sample.clamp(-1.0, 1.0).mul_(0.5).add_(0.5).mul_(255).permute(1, 2, 0).round().to(torch.uint8).detach().cpu()
+            for sample in samples
+        ]
         return samples

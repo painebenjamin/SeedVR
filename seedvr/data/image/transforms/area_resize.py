@@ -54,10 +54,11 @@ class AreaResize:
             interpolation=self.interpolation,
         )
     
-def area_resize (
+def area_resize(
     image: Union[torch.Tensor, Image.Image],
     scale: int,
     interpolation: InterpolationMode = InterpolationMode.BICUBIC,
+    multiple_of: int = 16,
 ):
     if isinstance(image, torch.Tensor):
         height, width = image.shape[-2:]
@@ -67,6 +68,8 @@ def area_resize (
         raise NotImplementedError
 
     resized_height, resized_width = round(height * scale), round(width * scale)
+    resized_height = math.ceil(resized_height / multiple_of) * multiple_of
+    resized_width = math.ceil(resized_width / multiple_of) * multiple_of
 
     return TVF.resize(
         image,

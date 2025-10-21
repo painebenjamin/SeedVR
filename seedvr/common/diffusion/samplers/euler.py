@@ -23,13 +23,14 @@ from einops import rearrange
 from torch.nn import functional as F
 
 from seedvr.models.dit_v2 import na
+from diffusers.schedulers.scheduling_utils import SchedulerMixin
 
 from ..types import PredictionType
 from ..utils import expand_dims
 from .base import Sampler, SamplerModelArgs
 
 
-class EulerSampler(Sampler):
+class EulerSampler(Sampler, SchedulerMixin):
     """
     The Euler method is the simplest ODE solver.
     <https://en.wikipedia.org/wiki/Euler_method>

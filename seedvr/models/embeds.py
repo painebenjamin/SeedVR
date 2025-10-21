@@ -3,13 +3,14 @@ import tempfile
 import os
 
 from typing import Tuple
+from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
 
 from .utils import PretrainedMixin
 from ..common.utils import read_from_url
 from .dit.na import flatten
 
 
-class PrecomputedEmbeddings(PretrainedMixin):
+class PrecomputedEmbeddings(PretrainedMixin, FlashPackDiffusersModelMixin):
     def __init__(
         self,
         positive: torch.Tensor,
