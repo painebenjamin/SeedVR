@@ -13,6 +13,7 @@
 # // limitations under the License.
 
 import torch
+from typing import Any
 
 from ...types import SamplingDirection
 from ..base import SamplingTimesteps
@@ -47,3 +48,13 @@ class UniformTrailingSamplingTimesteps(SamplingTimesteps):
             timesteps = timesteps.mul(T + 1).sub(1).round().int()
 
         super().__init__(T=T, timesteps=timesteps, direction=SamplingDirection.backward)
+
+    def set_timesteps(self, T: int, steps: int, shift: float = 1.0, direction: SamplingDirection | None = None, **kwargs: Any) -> None:
+        """
+        Set the timesteps.
+        """
+        timesteps = torch.arange(1.0, 0.0, -1.0 / steps, device=self.device)
+        timesteps = shift * timesteps / (1 + (shift - 1) * timesteps)
+        timesteps = timesteps.mul(T + 1).sub(1).round().int()
+        self._T = T
+        self.timesteps = timesteps

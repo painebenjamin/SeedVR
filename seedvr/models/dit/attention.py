@@ -19,9 +19,14 @@ try:
     from flash_attn_interface import flash_attn_varlen_func
     print("Using FlashAttention3")
 except ImportError:
-    from flash_attn import flash_attn_varlen_func
-    print("Using FlashAttention2")
+    try:
+        from flash_attn import flash_attn_varlen_func
+        print("Using FlashAttention2")
+    except ImportError:
+        print("Using PyTorch Attention")
+        flash_attn_varlen_func = None
 
+from ...common.utils import filter_kwargs_for_method
 from torch import nn
 
 class TorchAttention(nn.Module):
@@ -34,7 +39,17 @@ class TorchAttention(nn.Module):
         return b * h * (4 * d * (sq / 1e6) * (sk / 1e6))
 
     def forward(self, *args, **kwargs):
-        return F.scaled_dot_product_attention(*args, **kwargs)
+        query = kwargs.pop("query", kwargs.pop("q", None))
+        key = kwargs.pop("key", kwargs.pop("k", None))
+        value = kwargs.pop("value", kwargs.pop("v", None))
+        if query is None or key is None or value is None:
+            raise ValueError("query, key, value must be provided")
+
+        return F.scaled_dot_product_attention(
+            query=query,
+            key=key,
+            value=value,
+        )
 
 
 class FlashAttentionVarlen(nn.Module):
@@ -48,4 +63,6 @@ class FlashAttentionVarlen(nn.Module):
 
     def forward(self, *args, **kwargs):
         kwargs["deterministic"] = torch.are_deterministic_algorithms_enabled()
+        if flash_attn_varlen_func is None:
+            return TorchAttention()(*args, **kwargs)
         return flash_attn_varlen_func(*args, **kwargs)

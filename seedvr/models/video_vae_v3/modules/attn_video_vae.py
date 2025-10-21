@@ -11,7 +11,7 @@
 
 
 from contextlib import nullcontext
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple, Union, Any, Dict
 import diffusers
 import torch
 import torch.nn as nn
@@ -26,11 +26,14 @@ from diffusers.models.unets.unet_2d_blocks import DownEncoderBlock2D, UpDecoderB
 from diffusers.models.upsampling import Upsample2D
 from diffusers.utils import is_torch_version
 from diffusers.utils.accelerate_utils import apply_forward_hook
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
 from einops import rearrange
 
 from seedvr.common.distributed.advanced import get_sequence_parallel_world_size
 from seedvr.common.logger import get_logger
 from seedvr.common.utils import safe_pad_operation, safe_interpolate_operation
+from seedvr.models.utils import PretrainedMixin
 from seedvr.models.video_vae_v3.modules.causal_inflation_lib import (
     InflatedCausalConv3d,
     causal_norm_wrapper,
@@ -917,7 +920,6 @@ class Decoder3D(nn.Module):
         # up
         reversed_block_out_channels = list(reversed(block_out_channels))
         output_channel = reversed_block_out_channels[0]
-        print(f"slicing_up_num: {slicing_up_num}")
         for i, up_block_type in enumerate(up_block_types):
             prev_output_channel = output_channel
             output_channel = reversed_block_out_channels[i]
@@ -1020,31 +1022,6 @@ class Decoder3D(nn.Module):
         return sample
 
 
-class AutoencoderKL(diffusers.AutoencoderKL):
-    """
-    We simply inherit the model code from diffusers
-    """
-
-    def __init__(self, attention: bool = True, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # A hacky way to remove attention.
-        if not attention:
-            self.encoder.mid_block.attentions = torch.nn.ModuleList([None])
-            self.decoder.mid_block.attentions = torch.nn.ModuleList([None])
-
-    def load_state_dict(self, state_dict, strict=True):
-        # Newer version of diffusers changed the model keys,
-        # causing incompatibility with old checkpoints.
-        # They provided a method for conversion. We call conversion before loading state_dict.
-        convert_deprecated_attention_blocks = getattr(
-            self, "_convert_deprecated_attention_blocks", None
-        )
-        if callable(convert_deprecated_attention_blocks):
-            convert_deprecated_attention_blocks(state_dict)
-        return super().load_state_dict(state_dict, strict)
-
-
 class VideoAutoencoderKL(diffusers.AutoencoderKL):
     """
     We simply inherit the model code from diffusers
@@ -1054,31 +1031,37 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         self,
         in_channels: int = 3,
         out_channels: int = 3,
-        down_block_types: Tuple[str] = ("DownEncoderBlock3D",),
-        up_block_types: Tuple[str] = ("UpDecoderBlock3D",),
-        block_out_channels: Tuple[int] = (64,),
-        layers_per_block: int = 1,
+        down_block_types: Tuple[str] = ("DownEncoderBlock3D",) * 4,
+        up_block_types: Tuple[str] = ("UpDecoderBlock3D",) * 4,
+        block_out_channels: Tuple[int] = (128, 256, 512, 512),
+        layers_per_block: int = 2,
         act_fn: str = "silu",
-        latent_channels: int = 4,
+        latent_channels: int = 16,
         norm_num_groups: int = 32,
         sample_size: int = 32,
-        scaling_factor: float = 0.18215,
+        scaling_factor: float = 0.9152,
         force_upcast: float = True,
-        attention: bool = True,
         temporal_scale_num: int = 2,
         slicing_up_num: int = 0,
         gradient_checkpoint: bool = False,
-        inflation_mode: _inflation_mode_t = "tail",
+        inflation_mode: _inflation_mode_t = "pad",
         time_receptive_field: _receptive_field_t = "full",
         slicing_sample_min_size: int = 32,
         use_quant_conv: bool = True,
         use_post_quant_conv: bool = True,
-        *args,
-        **kwargs,
-    ):
-        extra_cond_dim = kwargs.pop("extra_cond_dim") if "extra_cond_dim" in kwargs else None
+        spatial_downsample_factor: int = 8,
+        temporal_downsample_factor: int = 4,
+        slicing: Dict[str, Any] = {"split_size": 4, "memory_device": "same"},
+        memory_limit: Dict[str, Any] = {"conv_max_mem": 0.5, "norm_max_mem": 0.5},
+        extra_cond_dim: Optional[int] = None, 
+        attention: bool = True,
+        grouping: bool = False,
+    ) -> None:
+        self.spatial_downsample_factor = spatial_downsample_factor
+        self.temporal_downsample_factor = temporal_downsample_factor
         self.slicing_sample_min_size = slicing_sample_min_size
         self.slicing_latent_min_size = slicing_sample_min_size // (2**temporal_scale_num)
+        self.grouping = grouping
 
         super().__init__(
             in_channels=in_channels,
@@ -1098,8 +1081,6 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
             sample_size=sample_size,
             scaling_factor=scaling_factor,
             force_upcast=force_upcast,
-            *args,
-            **kwargs,
         )
 
         # pass init params to Encoder
@@ -1118,6 +1099,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
             gradient_checkpoint=gradient_checkpoint,
             inflation_mode=inflation_mode,
             time_receptive_field=time_receptive_field,
+            mid_block_add_attention=attention,
         )
 
         # pass init params to Decoder
@@ -1135,6 +1117,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
             gradient_checkpoint=gradient_checkpoint,
             inflation_mode=inflation_mode,
             time_receptive_field=time_receptive_field,
+            mid_block_add_attention=attention,
         )
 
         self.quant_conv = (
@@ -1158,10 +1141,11 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
             else None
         )
 
-        # A hacky way to remove attention.
-        if not attention:
-            self.encoder.mid_block.attentions = torch.nn.ModuleList([None])
-            self.decoder.mid_block.attentions = torch.nn.ModuleList([None])
+        self.use_slicing = False
+        if slicing is not None:
+            self.set_causal_slicing(**slicing)
+        if memory_limit is not None:
+            self.set_memory_limit(**memory_limit)
 
     @apply_forward_hook
     def encode(self, x: torch.FloatTensor, return_dict: bool = True) -> AutoencoderKLOutput:
@@ -1278,19 +1262,69 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         return super().load_state_dict(state_dict, strict)
 
 
-class VideoAutoencoderKLWrapper(VideoAutoencoderKL):
+class VideoAutoencoderKLWrapper(PretrainedMixin, FlashPackDiffusersModelMixin, VideoAutoencoderKL, ConfigMixin):
+    @register_to_config
     def __init__(
         self,
-        *args,
-        spatial_downsample_factor: int,
-        temporal_downsample_factor: int,
-        freeze_encoder: bool,
-        **kwargs,
+        freeze_encoder: bool = False,
+        in_channels: int = 3,
+        out_channels: int = 3,
+        down_block_types: Tuple[str] = ("DownEncoderBlock3D",) * 4,
+        up_block_types: Tuple[str] = ("UpDecoderBlock3D",) * 4,
+        block_out_channels: Tuple[int] = (128, 256, 512, 512),
+        layers_per_block: int = 2,
+        act_fn: str = "silu",
+        latent_channels: int = 16,
+        norm_num_groups: int = 32,
+        sample_size: int = 32,
+        scaling_factor: float = 0.9152,
+        force_upcast: float = True,
+        temporal_scale_num: int = 2,
+        slicing_up_num: int = 0,
+        gradient_checkpoint: bool = False,
+        inflation_mode: _inflation_mode_t = "pad",
+        time_receptive_field: _receptive_field_t = "full",
+        slicing_sample_min_size: int = 32,
+        use_quant_conv: bool = True,
+        use_post_quant_conv: bool = True,
+        spatial_downsample_factor: int = 8,
+        temporal_downsample_factor: int = 4,
+        slicing: Dict[str, Any] = {"split_size": 4, "memory_device": "same"},
+        memory_limit: Dict[str, Any] = {"conv_max_mem": 0.5, "norm_max_mem": 0.5},
+        extra_cond_dim: Optional[int] = None, 
+        attention: bool = True,
+        grouping: bool = False,
     ):
-        self.spatial_downsample_factor = spatial_downsample_factor
-        self.temporal_downsample_factor = temporal_downsample_factor
+        super().__init__(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            down_block_types=down_block_types,
+            up_block_types=up_block_types,
+            block_out_channels=block_out_channels,
+            layers_per_block=layers_per_block,
+            act_fn=act_fn,
+            latent_channels=latent_channels,
+            norm_num_groups=norm_num_groups,
+            sample_size=sample_size,
+            scaling_factor=scaling_factor,
+            force_upcast=force_upcast,
+            temporal_scale_num=temporal_scale_num,
+            slicing_up_num=slicing_up_num,
+            gradient_checkpoint=gradient_checkpoint,
+            inflation_mode=inflation_mode,
+            time_receptive_field=time_receptive_field,
+            slicing_sample_min_size=slicing_sample_min_size,
+            use_quant_conv=use_quant_conv,
+            use_post_quant_conv=use_post_quant_conv,
+            spatial_downsample_factor=spatial_downsample_factor,
+            temporal_downsample_factor=temporal_downsample_factor,
+            slicing=slicing,
+            memory_limit=memory_limit,
+            extra_cond_dim=extra_cond_dim,
+            attention=attention,
+            grouping=grouping,
+        )
         self.freeze_encoder = freeze_encoder
-        super().__init__(*args, **kwargs)
 
     def forward(self, x: torch.FloatTensor) -> CausalAutoencoderOutput:
         with torch.no_grad() if self.freeze_encoder else nullcontext():

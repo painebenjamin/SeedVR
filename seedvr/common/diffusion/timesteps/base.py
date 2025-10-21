@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Sequence, Union
+from typing import Any, Sequence, Union
 import torch
 
 from ..types import SamplingDirection
@@ -21,6 +21,12 @@ class Timesteps(ABC):
         int if discrete, float if continuous.
         """
         return self._T
+
+    def set_timesteps(self, T: int, **kwargs: Any) -> None:
+        """
+        Set the timesteps.
+        """
+        self._T = T
 
     def is_continuous(self) -> bool:
         """
@@ -70,3 +76,13 @@ class SamplingTimesteps(Timesteps):
         idx = torch.full_like(t, fill_value=-1, dtype=torch.int)
         idx.view(-1)[i] = j.int()
         return idx
+
+    def set_timesteps(self, T: int, timesteps: torch.Tensor, direction: SamplingDirection | None = None, **kwargs: Any) -> None:
+        """
+        Set the timesteps.
+        """
+        self._T = T
+        self.timesteps = timesteps
+
+        if direction is not None:
+            self.direction = direction

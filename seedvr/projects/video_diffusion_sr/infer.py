@@ -327,6 +327,7 @@ class VideoDiffusionInfer():
                 rescale=self.config.diffusion.cfg.rescale,
             ),
         )
+        print(f"{latents=}")
 
         # Exit eval mode.
         self.dit.train(was_training)

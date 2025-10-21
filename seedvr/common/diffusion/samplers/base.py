@@ -22,6 +22,9 @@ from typing import Callable
 import torch
 from tqdm import tqdm
 
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from diffusers.models.modeling_utils import ModelMixin
+
 from ..schedules.base import Schedule
 from ..timesteps.base import SamplingTimesteps
 from ..types import PredictionType, SamplingDirection
@@ -35,7 +38,7 @@ class SamplerModelArgs:
     i: int
 
 
-class Sampler(ABC):
+class Sampler(ConfigMixin, ABC):
     """
     Samplers are ODE/SDE solvers.
     """

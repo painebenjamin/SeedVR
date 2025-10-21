@@ -27,7 +27,7 @@ from seedvr.data.image.transforms.divisible_crop import DivisibleCrop
 from seedvr.data.image.transforms.na_resize import NaResize
 from seedvr.data.video.transforms.rearrange import Rearrange
 
-from projects.video_diffusion_sr.color_fix import wavelet_reconstruction
+from seedvr.projects.video_diffusion_sr.color_fix import wavelet_reconstruction
 
 from torchvision.transforms import Compose, Lambda, Normalize
 from torchvision.io.video import read_video
@@ -65,13 +65,18 @@ def is_image_file(filename):
 def configure_runner(sp_size):
     config_path = os.path.join('./configs_7b', 'main.yaml')
     config = load_config(config_path)
+    print("Create runner")
     runner = VideoDiffusionInfer(config)
     OmegaConf.set_readonly(runner.config, False)
     
+    print("Init torch")
     init_torch(cudnn_benchmark=False, timeout=datetime.timedelta(seconds=3600))
+    print("Configure sequence parallel")
     configure_sequence_parallel(sp_size)
+    print("Configure dit model")
     runner.configure_dit_model(device="cuda", checkpoint='./ckpts/seedvr2_ema_7b.pth')
-    runner.configure_vae_model()
+    print("Configure vae model")
+    runner.configure_vae_model(device="cuda", checkpoint='./ckpts/ema_vae.pth')
     # Set memory limit.
     if hasattr(runner.vae, "set_memory_limit"):
         runner.vae.set_memory_limit(**runner.config.vae.memory_limit)
@@ -112,6 +117,8 @@ def generation_step(runner, text_embeds_dict, cond_latents):
         )
         for noise, aug_noise, latent_blur in zip(noises, aug_noises, cond_latents)
     ]
+
+    print(f"{conditions[0].shape=} {len(conditions)=} {conditions[0].min()} {conditions[0].max()}")
 
     with torch.no_grad(), torch.autocast("cuda", torch.bfloat16, enabled=True):
         video_tensors = runner.inference(
@@ -250,12 +257,13 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                 video = read_image(
                     os.path.join(video_path, video)
                 ).unsqueeze(0) / 255.0
+                fps_lists.append(1)
                 if sp_size > 1:
                     raise ValueError("Sp size should be set to 1 for image inputs!")
             else:
                 video, _, info = read_video(
                     os.path.join(video_path, video), output_format="TCHW"
-                    )
+                )
                 video = video / 255.0
                 fps_lists.append(info["video_fps"] if out_fps is None else out_fps)
             print(f"Read video size: {video.size()}")
@@ -264,6 +272,7 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
         ori_lengths = [video.size(1) for video in cond_latents]
         input_videos = cond_latents
         cond_latents = [cut_videos(video, sp_size) for video in cond_latents]
+        print(f"{cond_latents[0].shape=} {len(cond_latents)=} {cond_latents[0].min()} {cond_latents[0].max()}")
 
         runner.dit.to("cpu")
         print(f"Encoding videos: {list(map(lambda x: x.size(), cond_latents))}")
@@ -283,6 +292,7 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
 
         # dump samples to the output directory
         if get_sequence_parallel_rank() == 0:
+            print(f"Dumping {videos=} {input_videos=} {samples=} {ori_lengths=} {fps_lists=}")
             for path, input, sample, ori_length, save_fps in zip(
                 videos, input_videos, samples, ori_lengths, fps_lists
             ):
@@ -295,7 +305,7 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                     if input.ndim == 3
                     else rearrange(input, "c t h w -> t c h w")
                 )
-                if True:
+                if False:
                     sample = wavelet_reconstruction(
                         sample.to("cpu"), input[: sample.size(0)].to("cpu")
                     )
@@ -308,6 +318,8 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                 )
                 sample = sample.clip(-1, 1).mul_(0.5).add_(0.5).mul_(255).round()
                 sample = sample.to(torch.uint8).numpy()
+
+                print(f"{sample.shape=} {sample.min()} {sample.max()}")
 
                 if sample.shape[0] == 1:
                     mediapy.write_image(filename, sample.squeeze(0))

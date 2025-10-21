@@ -13,12 +13,15 @@
 # // limitations under the License.
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union, Callable
+from typing import Any, Optional, Tuple, Union, Callable
 import torch
 from torch import nn
 
 from seedvr.common.cache import Cache
 from seedvr.common.distributed.ops import slice_inputs
+
+from diffusers.configuration_utils import ConfigMixin, register_to_config
+from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
 
 from . import na
 from .embedding import TimeEmbedding
@@ -26,6 +29,7 @@ from .modulation import get_ada_layer
 from .nablocks import get_nablock
 from .normalization import get_norm_layer
 from .patch import NaPatchIn, NaPatchOut
+from ..utils import PretrainedMixin
 
 # Fake func, no checkpointing is required for inference
 def gradient_checkpointing(module: Union[Callable, nn.Module], *args, enabled: bool, **kwargs):
@@ -36,42 +40,43 @@ class NaDiTOutput:
     vid_sample: torch.Tensor
 
 
-class NaDiT(nn.Module):
+class NaDiT(PretrainedMixin, FlashPackDiffusersModelMixin, ConfigMixin):
     """
-    Native Resolution Diffusion Transformer (NaDiT)
+    Native Resolution Diffusers Transformer (NaDiT)
     """
-
+    config_name = "config"
     gradient_checkpointing = False
 
+    @register_to_config
     def __init__(
         self,
-        vid_in_channels: int,
-        vid_out_channels: int,
-        vid_dim: int,
-        txt_in_dim: Optional[int],
-        txt_dim: Optional[int],
-        emb_dim: int,
-        heads: int,
-        head_dim: int,
-        expand_ratio: int,
-        norm: Optional[str],
-        norm_eps: float,
-        ada: str,
-        qk_bias: bool,
-        qk_rope: bool,
-        qk_norm: Optional[str],
-        patch_size: Union[int, Tuple[int, int, int]],
-        num_layers: int,
-        block_type: Union[str, Tuple[str]],
+        vid_in_channels: int = 33,
+        vid_out_channels: int = 16,
+        vid_dim: int = 3072,
+        txt_in_dim: Optional[int] = 5120,
+        txt_dim: Optional[int] = 3072,
+        emb_dim: int = 18432,
+        heads: int = 24,
+        head_dim: int = 128,
+        expand_ratio: int = 4,
+        norm: Optional[str] = "fusedrms",
+        norm_eps: float = 1e-5,
+        ada: str = "single",
+        qk_bias: bool = False,
+        qk_rope: bool = True,
+        qk_norm: Optional[str] = "fusedrms",
+        patch_size: Union[int, Tuple[int, int, int]] = (1, 2, 2),
+        num_layers: int = 36,
+        block_type: Union[str, Tuple[str]] = ("mmdit_sr",) * 36,
         shared_qkv: bool = False,
         shared_mlp: bool = False,
         mlp_type: str = "normal",
-        window: Optional[Tuple] = None,
-        window_method: Optional[Tuple[str]] = None,
-        temporal_window_size: int = None,
+        window: Optional[Tuple] = ((4, 3, 3),) * 36,
+        window_method: Optional[Tuple[str]] = ("720pwin_by_size_bysize", "720pswin_by_size_bysize") * 18,
+        temporal_window_size: Optional[int] = None,
         temporal_shifted: bool = False,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         ada = get_ada_layer(ada)
         norm = get_norm_layer(norm)
         qk_norm = get_norm_layer(qk_norm)
@@ -190,7 +195,7 @@ class NaDiT(nn.Module):
 
 class NaDiTUpscaler(nn.Module):
     """
-    Native Resolution Diffusion Transformer (NaDiT)
+    Native Resolution Diffusers Transformer (NaDiT)
     """
 
     gradient_checkpointing = False
