@@ -35,17 +35,8 @@ class PrecomputedEmbeddings(PretrainedMixin, FlashPackDiffusersModelMixin):
         """
         Load the default precomputed embeddings from the Hugging Face Hub.
         """
-        with tempfile.TemporaryDirectory() as temp_dir:
-            neg_embeds_path = os.path.join(temp_dir, "neg_emb.pt")
-            pos_embeds_path = os.path.join(temp_dir, "pos_emb.pt")
-
-            with open(neg_embeds_path, "wb") as f:
-                f.write(read_from_url("https://github.com/ByteDance-Seed/SeedVR/raw/refs/heads/main/neg_emb.pt"))
-
-            with open(pos_embeds_path, "wb") as f:
-                f.write(read_from_url("https://github.com/ByteDance-Seed/SeedVR/raw/refs/heads/main/pos_emb.pt"))
-
-            positive = torch.load(pos_embeds_path)
-            negative = torch.load(neg_embeds_path)
-            embeddings = cls(positive, negative)
-            return embeddings.to(device=device, dtype=dtype)
+        from seedvr.data import NEG_EMB_PATH, POS_EMB_PATH
+        positive = torch.load(POS_EMB_PATH)
+        negative = torch.load(NEG_EMB_PATH)
+        embeddings = cls(positive, negative)
+        return embeddings.to(device=device, dtype=dtype)

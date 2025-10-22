@@ -71,6 +71,7 @@ def init_torch(cudnn_benchmark=True, timeout=timedelta(seconds=600)):
         backend="nccl",
         rank=get_global_rank(),
         world_size=get_world_size(),
+        device_id=get_local_rank(),
         timeout=timeout,
     )
 

@@ -2,10 +2,9 @@ import inspect
 import time
 import torch
 import torch.nn.functional as F
-from collections.abc import Iterator
+from collections.abc import Iterator, Iterable
 from contextlib import contextmanager
 from typing import Callable, Dict, Any
-
 from functools import lru_cache
 from typing import Any
 from urllib.request import urlopen
@@ -219,3 +218,91 @@ def read_from_url(url: str, timeout: int = 10, retries: int = 3) -> bytes:
             if attempt == retries - 1:
                 raise e
             time.sleep(2 ** attempt)
+
+
+@lru_cache
+def sliding_2d_windows(
+    height: int,
+    width: int,
+    tile_size: int | tuple[int, int],
+    tile_stride: int | tuple[int, int],
+) -> list[tuple[int, int, int, int]]:
+    """
+    Gets windows over a height/width using a square tile.
+
+    :param height: The height of the area.
+    :param width: The width of the area.
+    :param tile_size: The size of the tile.
+    :param tile_stride: The stride of the tile.
+
+    :return: A list of tuples representing the windows in the format (top, bottom, left, right).
+    """
+    if isinstance(tile_size, tuple):
+        tile_width, tile_height = tile_size
+    else:
+        tile_width = tile_height = int(tile_size)
+
+    if isinstance(tile_stride, tuple):
+        tile_stride_width, tile_stride_height = tile_stride
+    else:
+        tile_stride_width = tile_stride_height = int(tile_stride)
+
+    height_list = list(range(0, height - tile_height + 1, tile_stride_height))
+    if (height - tile_height) % tile_stride_height != 0:
+        height_list.append(height - tile_height)
+
+    width_list = list(range(0, width - tile_width + 1, tile_stride_width))
+    if (width - tile_width) % tile_stride_width != 0:
+        width_list.append(width - tile_width)
+
+    coords: list[tuple[int, int, int, int]] = []
+    for height in height_list:
+        for width in width_list:
+            coords.append((height, height + tile_height, width, width + tile_width))
+
+    return coords
+
+def tqdm_available() -> bool:
+    """
+    Check if tqdm is available.
+    """
+    try:
+        import tqdm
+        return True
+    except ImportError:
+        return False
+
+def maybe_use_tqdm(
+    iterable: Iterable[Any],
+    use_tqdm: bool = True,
+    desc: str | None = None,
+    total: int | None = None,
+    unit: str = "it",
+    unit_scale: bool = False,
+    unit_divisor: int = 1000,
+) -> Iterator[Any]:
+    """
+    Return the iterable or wrap it in a tqdm if use_tqdm is True.
+
+    :param iterable: The iterable to return.
+    :param use_tqdm: Whether to wrap the iterable in a tqdm.
+    :param desc: The description to display.
+    :param total: The total number of items.
+    :param unit: The unit to display.
+    :param unit_scale: Whether to scale the unit.
+    :param unit_divisor: The unit divisor.
+    :return: The iterable or tqdm wrapped iterable.
+    """
+    if use_tqdm and tqdm_available():
+        from tqdm import tqdm
+
+        yield from tqdm(
+            iterable,
+            desc=desc,
+            total=total,
+            unit=unit,
+            unit_scale=unit_scale,
+            unit_divisor=unit_divisor,
+        )
+    else:
+        yield from iterable

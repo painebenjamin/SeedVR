@@ -16,6 +16,8 @@ import diffusers
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
+from einops import rearrange, repeat
 from diffusers.models.attention_processor import Attention, SpatialNorm
 from diffusers.models.autoencoders.vae import DecoderOutput, DiagonalGaussianDistribution
 from diffusers.models.downsampling import Downsample2D
@@ -28,11 +30,12 @@ from diffusers.utils import is_torch_version
 from diffusers.utils.accelerate_utils import apply_forward_hook
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
-from einops import rearrange
 
 from seedvr.common.distributed.advanced import get_sequence_parallel_world_size
 from seedvr.common.logger import get_logger
-from seedvr.common.utils import safe_pad_operation, safe_interpolate_operation
+from seedvr.common.utils import (
+    safe_pad_operation, safe_interpolate_operation, maybe_use_tqdm, sliding_2d_windows,
+)
 from seedvr.models.utils import PretrainedMixin
 from seedvr.models.video_vae_v3.modules.causal_inflation_lib import (
     InflatedCausalConv3d,
@@ -54,9 +57,13 @@ from seedvr.models.video_vae_v3.modules.types import (
     _memory_device_t,
     _receptive_field_t,
 )
+from tqdm import tqdm
 
 logger = get_logger(__name__)  # pylint: disable=invalid-name
-
+DEFAULT_LATENT_TILE_SIZE = (48, 48)
+DEFAULT_LATENT_TILE_STRIDE = (32, 32)
+DEFAULT_PIXEL_TILE_SIZE = (384, 384)
+DEFAULT_PIXEL_TILE_STRIDE = (256, 256)
 
 class Upsample3D(Upsample2D):
     """A 3D upsampling layer with an optional convolution."""
@@ -1173,68 +1180,428 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
     def _encode(
         self, x: torch.Tensor, memory_state: MemoryState = MemoryState.DISABLED
     ) -> torch.Tensor:
-        _x = x.to(self.device)
-        _x = causal_conv_slice_inputs(_x, self.slicing_sample_min_size, memory_state=memory_state)
-        h = self.encoder(_x, memory_state=memory_state)
+        h = self.encoder(x, memory_state=memory_state)
         if self.quant_conv is not None:
             output = self.quant_conv(h, memory_state=memory_state)
         else:
             output = h
-        output = causal_conv_gather_outputs(output)
-        return output.to(x.device)
+        return output
 
     def _decode(
         self, z: torch.Tensor, memory_state: MemoryState = MemoryState.DISABLED
     ) -> torch.Tensor:
-        _z = z.to(self.device)
-        _z = causal_conv_slice_inputs(_z, self.slicing_latent_min_size, memory_state=memory_state)
         if self.post_quant_conv is not None:
-            _z = self.post_quant_conv(_z, memory_state=memory_state)
-        output = self.decoder(_z, memory_state=memory_state)
-        output = causal_conv_gather_outputs(output)
-        return output.to(z.device)
+            z = self.post_quant_conv(z, memory_state=memory_state)
+        output = self.decoder(z, memory_state=memory_state)
+        return output
 
     def slicing_encode(self, x: torch.Tensor) -> torch.Tensor:
         sp_size = get_sequence_parallel_world_size()
         if self.use_slicing and (x.shape[2] - 1) > self.slicing_sample_min_size * sp_size:
             x_slices = x[:, :, 1:].split(split_size=self.slicing_sample_min_size * sp_size, dim=2)
+            progress_bar = tqdm(total=len(x_slices), desc="Encoding")
             encoded_slices = [
-                self._encode(
+                self.tiled_encode(
                     torch.cat((x[:, :, :1], x_slices[0]), dim=2),
+                    device=self.device,
                     memory_state=MemoryState.INITIALIZING,
+                    use_tqdm=False,
                 )
             ]
+            progress_bar.update(1)
             for x_idx in range(1, len(x_slices)):
                 encoded_slices.append(
-                    self._encode(x_slices[x_idx], memory_state=MemoryState.ACTIVE)
+                    self.tiled_encode(
+                        x_slices[x_idx],
+                        device=self.device,
+                        memory_state=MemoryState.ACTIVE,
+                        use_tqdm=False,
+                    )
                 )
+                progress_bar.update(1)
+            progress_bar.close()
             return torch.cat(encoded_slices, dim=2)
         else:
-            return self._encode(x)
+            return self.tiled_encode(x, device=self.device, use_tqdm=True)
 
     def slicing_decode(self, z: torch.Tensor) -> torch.Tensor:
         sp_size = get_sequence_parallel_world_size()
         if self.use_slicing and (z.shape[2] - 1) > self.slicing_latent_min_size * sp_size:
             z_slices = z[:, :, 1:].split(split_size=self.slicing_latent_min_size * sp_size, dim=2)
+            progress_bar = None
+            if len(z_slices) > 1:
+                progress_bar = tqdm(total=len(z_slices), desc="Decoding")
+    
             decoded_slices = [
-                self._decode(
+                self.tiled_decode(
                     torch.cat((z[:, :, :1], z_slices[0]), dim=2),
+                    device=self.device,
+                    use_tqdm=False,
                     memory_state=MemoryState.INITIALIZING,
                 )
             ]
+            if progress_bar is not None:
+                progress_bar.update(1)
             for z_idx in range(1, len(z_slices)):
                 decoded_slices.append(
-                    self._decode(z_slices[z_idx], memory_state=MemoryState.ACTIVE)
+                    self.tiled_decode(
+                        z_slices[z_idx],
+                        device=self.device,
+                        use_tqdm=False,
+                        memory_state=MemoryState.ACTIVE,
+                    )
                 )
+                if progress_bar is not None:
+                    progress_bar.update(1)
+            if progress_bar is not None:
+                progress_bar.close()
             return torch.cat(decoded_slices, dim=2)
         else:
-            return self._decode(z)
+            return self.tiled_decode(
+                z,
+                device=self.device,
+                use_tqdm=True,
+                memory_state=MemoryState.DISABLED,
+            )
 
-    def tiled_encode(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        raise NotImplementedError
+    @torch.no_grad()
+    def tiled_decode(
+        self,
+        hidden_states: torch.Tensor,
+        device: torch.device,
+        tile_size: tuple[int, int] = DEFAULT_LATENT_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_LATENT_TILE_STRIDE,
+        loop: bool = False,
+        use_tqdm: bool = True,
+        memory_state: MemoryState = MemoryState.DISABLED,
+    ) -> torch.Tensor | None:
+        """
+        :param hidden_states: hidden states tensor [B, C, T, H, W]
+        :param device: device
+        :param tile_size: tile size
+        :param tile_stride: tile stride
+        :return: output tensor [B, C, T, H, W]
+        """
+        hidden_states = hidden_states.to(dtype=self.dtype)
+        _, _, T, H, W = hidden_states.shape
+        size_h, size_w = tile_size
+        stride_h, stride_w = tile_stride
 
-    def tiled_decode(self, z: torch.Tensor, **kwargs) -> torch.Tensor:
-        raise NotImplementedError
+        size_h = min(size_h, H)
+        size_w = min(size_w, W)
+        stride_h = min(stride_h, size_h)
+        stride_w = min(stride_w, size_w)
+
+        is_distributed = False
+        rank = 0
+        world_size = 1
+
+        if dist.is_initialized():
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            is_distributed = world_size > 1
+
+        # Split tasks
+        tasks = sliding_2d_windows(
+            height=H,
+            width=W,
+            tile_size=(size_w, size_h),
+            tile_stride=(stride_w, stride_h),
+        )
+
+        # Handle distributed processing
+        if is_distributed:
+            # Distribute tasks among ranks
+            if len(tasks) < world_size:
+                # If fewer tasks than ranks, distribute one task per rank until we run out
+                if rank < len(tasks):
+                    local_tasks = [tasks[rank]]
+                else:
+                    local_tasks = []
+            else:
+                # Distribute tasks evenly
+                tasks_per_rank = len(tasks) // world_size
+                remainder = len(tasks) % world_size
+
+                start_idx = rank * tasks_per_rank + min(rank, remainder)
+                end_idx = start_idx + tasks_per_rank + (1 if rank < remainder else 0)
+                local_tasks = tasks[start_idx:end_idx]
+        else:
+            local_tasks = tasks
+
+        # Use GPU for distributed processing, CPU for non-distributed
+        if is_distributed:
+            data_device = device
+            computation_device = device
+        else:
+            data_device = torch.device("cpu")
+            computation_device = device
+
+        out_T = T * 4 - 3
+        weight = torch.zeros(
+            (1, 1, out_T, H * self.spatial_downsample_factor, W * self.spatial_downsample_factor),
+            dtype=hidden_states.dtype,
+            device=data_device,
+        )
+        values = torch.zeros(
+            (1, 3, out_T, H * self.spatial_downsample_factor, W * self.spatial_downsample_factor),
+            dtype=hidden_states.dtype,
+            device=data_device,
+        )
+
+        # Process local tasks
+        for h, h_, w, w_ in maybe_use_tqdm(
+            local_tasks, desc="Decoding", use_tqdm=use_tqdm and rank == 0
+        ):
+            hidden_states_batch = hidden_states[:, :, :, h:h_, w:w_].to(
+                computation_device
+            )
+            hidden_states_batch = self._decode(
+                hidden_states_batch, memory_state=memory_state
+            ).to(data_device)
+            hidden_states_batch.clamp_(-1, 1)
+            hidden_states_batch = hidden_states_batch[:, :, :out_T]
+
+            mask = self.build_mask(
+                hidden_states_batch,
+                is_bound=(h == 0, h_ >= H, w == 0, w_ >= W),
+                border_width=(
+                    (size_h - stride_h) * self.spatial_downsample_factor,
+                    (size_w - stride_w) * self.spatial_downsample_factor,
+                ),
+            ).to(dtype=hidden_states.dtype, device=data_device)
+
+            target_h = h * self.spatial_downsample_factor
+            target_w = w * self.spatial_downsample_factor
+            values[
+                :,
+                :,
+                :,
+                target_h : target_h + hidden_states_batch.shape[3],
+                target_w : target_w + hidden_states_batch.shape[4],
+            ] += (
+                hidden_states_batch * mask
+            )
+            weight[
+                :,
+                :,
+                :,
+                target_h : target_h + hidden_states_batch.shape[3],
+                target_w : target_w + hidden_states_batch.shape[4],
+            ] += mask
+
+        # Handle distributed assembly
+        if is_distributed:
+            value_reduce = dist.reduce(
+                values, dst=0, op=dist.ReduceOp.SUM, async_op=True
+            )
+            weight_reduce = dist.reduce(
+                weight, dst=0, op=dist.ReduceOp.SUM, async_op=True
+            )
+
+            # Wait for the reduction to complete
+            value_reduce.wait()
+            weight_reduce.wait()
+            torch.cuda.synchronize() if device.type == "cuda" else None
+
+            if rank == 0:
+                # Distributed case, only return values on rank 0
+                values = values / weight
+                values = values.float().clamp_(-1, 1)
+                return values.to("cpu")
+            return None
+        else:
+            # Non-distributed case
+            values = values / weight
+            values = values.float().clamp_(-1, 1)
+            return values.to("cpu")
+
+    @torch.no_grad()
+    def tiled_encode(
+        self,
+        video: torch.Tensor,
+        device: torch.device | None = None,
+        tile_size: tuple[int, int] = DEFAULT_PIXEL_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_PIXEL_TILE_STRIDE,
+        use_tqdm: bool = True,
+        memory_state: MemoryState = MemoryState.DISABLED,
+    ) -> torch.Tensor:
+        """
+        :param video: video tensor [B, C, T, H, W]
+        :param device: device
+        :param tile_size: tile size
+        :param tile_stride: tile stride
+        :return: output tensor [B, C, T, H, W]
+        """
+        if device is None:
+            device = self.device
+
+        video = video.to(dtype=self.dtype)
+        _, _, T, H, W = video.shape
+        size_h, size_w = tile_size
+        stride_h, stride_w = tile_stride
+
+        is_distributed = False
+        rank = 0
+        world_size = 1
+
+        if dist.is_initialized():
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            is_distributed = world_size > 1
+
+        # Split tasks
+        tasks = sliding_2d_windows(
+            height=H,
+            width=W,
+            tile_size=(size_w, size_h),
+            tile_stride=(stride_w, stride_h),
+        )
+
+        # Handle distributed processing
+        if is_distributed:
+            # Distribute tasks among ranks
+            if len(tasks) < world_size:
+                # If fewer tasks than ranks, distribute one task per rank until we run out
+                if rank < len(tasks):
+                    local_tasks = [tasks[rank]]
+                else:
+                    local_tasks = []
+            else:
+                # Distribute tasks evenly
+                tasks_per_rank = len(tasks) // world_size
+                remainder = len(tasks) % world_size
+
+                start_idx = rank * tasks_per_rank + min(rank, remainder)
+                end_idx = start_idx + tasks_per_rank + (1 if rank < remainder else 0)
+                local_tasks = tasks[start_idx:end_idx]
+        else:
+            local_tasks = tasks
+
+        # Use GPU for distributed processing, CPU for non-distributed
+        if is_distributed:
+            data_device = device
+            computation_device = device
+        else:
+            data_device = torch.device("cpu")
+            computation_device = device
+
+        out_T = (T + 3) // 4
+        weight = torch.zeros(
+            (1, 1, out_T, H // self.spatial_downsample_factor, W // self.spatial_downsample_factor),
+            dtype=video.dtype,
+            device=data_device,
+        )
+        values = torch.zeros(
+            (1, self.config.latent_channels * 2, out_T, H // self.spatial_downsample_factor, W // self.spatial_downsample_factor),
+            dtype=video.dtype,
+            device=data_device,
+        )
+
+        task_num = 0
+        num_tasks = len(local_tasks)
+        for h, h_, w, w_ in maybe_use_tqdm(
+            local_tasks, desc="Encoding", use_tqdm=use_tqdm and rank == 0
+        ):
+            hidden_states_batch = video[:, :, :, h:h_, w:w_].to(computation_device)
+            hidden_states_batch = self._encode(hidden_states_batch, memory_state=memory_state).to(
+                data_device
+            )
+
+            mask = self.build_mask(
+                hidden_states_batch,
+                is_bound=(h == 0, h_ >= H, w == 0, w_ >= W),
+                border_width=(
+                    (size_h - stride_h) // self.spatial_downsample_factor,
+                    (size_w - stride_w) // self.spatial_downsample_factor,
+                ),
+            ).to(dtype=video.dtype, device=data_device)
+
+            target_h = h // self.spatial_downsample_factor
+            target_w = w // self.spatial_downsample_factor
+            values[
+                :,
+                :,
+                :,
+                target_h : target_h + hidden_states_batch.shape[3],
+                target_w : target_w + hidden_states_batch.shape[4],
+            ] += (
+                hidden_states_batch * mask
+            )
+            weight[
+                :,
+                :,
+                :,
+                target_h : target_h + hidden_states_batch.shape[3],
+                target_w : target_w + hidden_states_batch.shape[4],
+            ] += mask
+
+            task_num += 1
+
+        # Handle distributed assembly
+        if is_distributed:
+            value_reduce = dist.all_reduce(values, op=dist.ReduceOp.SUM, async_op=True)
+            weight_reduce = dist.all_reduce(weight, op=dist.ReduceOp.SUM, async_op=True)
+
+            # Wait for the reduction to complete
+            value_reduce.wait()
+            weight_reduce.wait()
+            torch.cuda.synchronize() if device.type == "cuda" else None
+
+            # All ranks return the same values
+            values = values / weight
+            return values
+        else:
+            # Non-distributed case
+            values = values / weight
+            return values.to(device)
+
+
+    def build_1d_mask(
+        self, length: int, left_bound: bool, right_bound: bool, border_width: int
+    ) -> torch.Tensor:
+        """
+        Builds a 1D mask.
+
+        :param length: length
+        :param left_bound: left bound
+        :param right_bound: right bound
+        :param border_width: border width
+        :return: mask
+        """
+        x = torch.ones((length,))
+
+        if not left_bound:
+            x[:border_width] = (torch.arange(border_width) + 1) / border_width
+        if not right_bound:
+            x[-border_width:] = torch.flip(
+                (torch.arange(border_width) + 1) / border_width, dims=(0,)
+            )
+
+        return x
+
+    def build_mask(
+        self,
+        data: torch.Tensor,
+        is_bound: tuple[bool, bool, bool, bool],
+        border_width: tuple[int, int],
+    ) -> torch.Tensor:
+        """
+        :param data: data tensor [B, C, T, H, W]
+        :param is_bound: bound toggle for each side
+        :param border_width: border width
+        :return: mask tensor [1, 1, 1, H, W]
+        """
+        _, _, _, H, W = data.shape
+        h = self.build_1d_mask(H, is_bound[0], is_bound[1], border_width[0])
+        w = self.build_1d_mask(W, is_bound[2], is_bound[3], border_width[1])
+
+        h = repeat(h, "H -> H W", H=H, W=W)
+        w = repeat(w, "W -> H W", H=H, W=W)
+
+        mask = torch.stack([h, w]).min(dim=0).values
+        mask = rearrange(mask, "H W -> 1 1 1 H W")
+        return mask
 
     def forward(
         self, x: torch.FloatTensor, mode: Literal["encode", "decode", "all"] = "all", **kwargs
@@ -1367,6 +1734,7 @@ class VideoAutoencoderKLWrapper(PretrainedMixin, FlashPackDiffusersModelMixin, V
         ), "if split_size is set, memory_device must not be None."
         if split_size is not None:
             self.enable_slicing()
+            split_size = split_size * 4
             self.slicing_sample_min_size = split_size
             self.slicing_latent_min_size = split_size // self.temporal_downsample_factor
         else:

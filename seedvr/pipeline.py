@@ -22,8 +22,16 @@ from seedvr.common.diffusion import (
 from seedvr.common.distributed import (
     get_device,
     get_global_rank,
+    get_world_size,
 )
-from seedvr.common.utils import filter_kwargs_for_method
+from seedvr.common.distributed.advanced import (
+    get_data_parallel_rank,
+    get_data_parallel_world_size,
+    get_sequence_parallel_rank,
+    get_sequence_parallel_world_size,
+    init_sequence_parallel,
+)
+from seedvr.common.utils import filter_kwargs_for_method, maybe_use_tqdm
 from seedvr.models.dit.na import flatten, unflatten, pack, unpack
 from seedvr.models.dit.nadit import NaDiT
 from seedvr.models.video_vae_v3.modules.attn_video_vae import VideoAutoencoderKLWrapper
@@ -276,15 +284,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         latents = unflatten(latents, latents_shapes)
         latents = [latent.to(self.vae.dtype) for latent in latents]
 
-        if dit_offload:
-            self.dit.to("cpu")
-
         # Vae decode.
-        self.vae.to(get_device())
         samples = self.vae_decode(latents)
 
-        if dit_offload:
-            self.dit.to(get_device())
         return samples
 
     def get_linear_shift_function(self, x1: float, y1: float, x2: float, y2: float) -> Callable[[float], float]:
@@ -373,6 +375,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         batch_size: int = 1,
         temporal_overlap: int = 0,
         cond_noise_scale: float = 0.05,
+        use_tqdm: bool = True,
     ) -> torch.Tensor:
         """
         Generate a video from a media.
@@ -381,46 +384,94 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         c, f, h, w = media.shape
 
         overlap = 0 if f == 1 else temporal_overlap
-        step_size = batch_size - overlap
+        batch_size = max(batch_size, overlap + 1)
+        if batch_size % 4 != 1:
+            batch_size = math.ceil(batch_size / 4) * 4 + 1
 
+        step_size = batch_size - overlap
+        if step_size % 4 != 1:
+            step_size = math.ceil(step_size / 4) * 4 + 1
+
+        # Set up reproducibility.
         if seed is None:
             seed = random.randint(0, 2**32-1)
 
         generator = torch.Generator(device=get_device()).manual_seed(seed)
-
-        # TODO: Implement the video generation.
+        # Prepare media for inference.
         target_area = height * width
         media_area = h * w
         scale = math.sqrt(target_area / media_area)
         media = area_resize(media, scale)
-        latents = self.vae_encode([media])
-        latents = [latent.to(self.dit.dtype) for latent in latents]
-        noises = [self.random_seeded_like(latent, generator) for latent in latents]
-        aug_noises = [self.random_seeded_like(latent, generator) for latent in latents]
-        conditions = [
-            self.get_condition(
-                noise,
-                self.add_noise(latent, aug_noise, cond_noise_scale),
-                task="sr",
+
+        # Update h, w
+        h, w = media.shape[2:]
+
+        # Now iterate over the media in batches.
+        output_samples = []
+
+        for batch_idx in maybe_use_tqdm(
+            range(0, f - overlap, step_size),
+            desc="Upsampling",
+            use_tqdm=use_tqdm,
+        ):
+            batch_media = media[:, batch_idx:batch_idx + batch_size]
+            num_padded_frames = 0
+            if batch_media.shape[1] % 4 != 1:
+                num_padded_frames = 4 - (batch_media.shape[1] % 4) + 1
+                batch_media = torch.cat([batch_media] + [batch_media[:, -1:]] * num_padded_frames, dim=1)
+
+            latents = self.vae_encode([batch_media])
+            latents = [latent.to(self.dit.dtype) for latent in latents]
+            noises = [self.random_seeded_like(latent, generator) for latent in latents]
+            aug_noises = [self.random_seeded_like(latent, generator) for latent in latents]
+            conditions = [
+                self.get_condition(
+                    noise,
+                    self.add_noise(latent, aug_noise, cond_noise_scale),
+                    task="sr",
+                )
+                for noise, aug_noise, latent in zip(noises, aug_noises, latents)
+            ]
+            samples = self.inference(
+                noises,
+                conditions,
+                cfg_scale,
+                cfg_rescale,
             )
-            for noise, aug_noise, latent in zip(noises, aug_noises, latents)
+            samples = [
+                sample.unsqueeze(1)
+                if sample.ndim == 3
+                else sample
+                for sample in samples
+            ]
+
+            batch_media = rearrange(batch_media, "c t h w -> t c h w").to(self.wavelet_kernel.device, dtype=self.wavelet_kernel.dtype)
+            samples = [
+                rearrange(sample, "c t h w -> t c h w").to(self.wavelet_kernel.device, dtype=self.wavelet_kernel.dtype)
+                for sample in samples
+            ]
+            print(f"Samples shape: {samples[0].shape} {num_padded_frames=} {batch_media.shape=}")
+            if num_padded_frames > 0:
+                batch_media = batch_media[:-num_padded_frames]
+                samples = [
+                    sample[:-num_padded_frames]
+                    for sample in samples
+                ]
+            samples = [
+                wavelet_reconstruction(sample, batch_media, self.wavelet_kernel)
+                for sample in samples
+            ]
+            samples = [
+                sample.clamp(-1.0, 1.0).mul_(0.5).add_(0.5).mul_(255).round().to(torch.uint8).detach().cpu()
+                for sample in samples
+            ]
+            if batch_idx > 0 and overlap > 0:
+                samples = [sample[overlap:] for sample in samples]
+
+            output_samples.append(samples)
+
+        output_samples = [
+            torch.cat(samples, dim=0)
+            for samples in zip(*output_samples)
         ]
-        samples = self.inference(
-            noises,
-            conditions,
-            cfg_scale,
-            cfg_rescale,
-        )
-        samples = [
-            wavelet_reconstruction(
-                samples[i].to(dtype=self.wavelet_kernel.dtype),
-                media[:, i].to(samples[i].device, dtype=self.wavelet_kernel.dtype),
-                self.wavelet_kernel,
-            )
-            for i in range(len(samples))
-        ]
-        samples = [
-            sample.clamp(-1.0, 1.0).mul_(0.5).add_(0.5).mul_(255).permute(1, 2, 0).round().to(torch.uint8).detach().cpu()
-            for sample in samples
-        ]
-        return samples
+        return output_samples
