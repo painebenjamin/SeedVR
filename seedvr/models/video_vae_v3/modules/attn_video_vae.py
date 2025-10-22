@@ -1225,9 +1225,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
 
     @apply_forward_hook
     def encode(
-        self, x: torch.FloatTensor, return_dict: bool = True
+        self, x: torch.FloatTensor, return_dict: bool = True, use_tiling: bool = True
     ) -> AutoencoderKLOutput:
-        h = self.slicing_encode(x)
+        h = self.slicing_encode(x, use_tiling=use_tiling)
         posterior = DiagonalGaussianDistribution(h)
 
         if not return_dict:
@@ -1237,9 +1237,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
 
     @apply_forward_hook
     def decode(
-        self, z: torch.Tensor, return_dict: bool = True
+        self, z: torch.Tensor, return_dict: bool = True, use_tiling: bool = True
     ) -> DecoderOutput | torch.Tensor:
-        decoded = self.slicing_decode(z)
+        decoded = self.slicing_decode(z, use_tiling=use_tiling)
 
         if not return_dict:
             return (decoded,)
@@ -1264,7 +1264,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         output = self.decoder(z, memory_state=memory_state)
         return output
 
-    def slicing_encode(self, x: torch.Tensor) -> torch.Tensor:
+    def slicing_encode(self, x: torch.Tensor, use_tiling: bool = True) -> torch.Tensor:
         sp_size = get_sequence_parallel_world_size()
         if (
             self.use_slicing
@@ -1280,6 +1280,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                     device=self.device,
                     memory_state=MemoryState.INITIALIZING,
                     use_tqdm=False,
+                    use_tiling=use_tiling,
                 )
             ]
             progress_bar.update(1)
@@ -1290,15 +1291,16 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                         device=self.device,
                         memory_state=MemoryState.ACTIVE,
                         use_tqdm=False,
+                        use_tiling=use_tiling,
                     )
                 )
                 progress_bar.update(1)
             progress_bar.close()
             return torch.cat(encoded_slices, dim=2)
         else:
-            return self.tiled_encode(x, device=self.device, use_tqdm=True)
+            return self.tiled_encode(x, device=self.device, use_tqdm=True, use_tiling=use_tiling)
 
-    def slicing_decode(self, z: torch.Tensor) -> torch.Tensor:
+    def slicing_decode(self, z: torch.Tensor, use_tiling: bool = True) -> torch.Tensor:
         sp_size = get_sequence_parallel_world_size()
         if (
             self.use_slicing
@@ -1317,6 +1319,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                     device=self.device,
                     use_tqdm=False,
                     memory_state=MemoryState.INITIALIZING,
+                    use_tiling=use_tiling,
                 )
             ]
             if progress_bar is not None:
@@ -1328,6 +1331,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                         device=self.device,
                         use_tqdm=False,
                         memory_state=MemoryState.ACTIVE,
+                        use_tiling=use_tiling,
                     )
                 )
                 if progress_bar is not None:
@@ -1341,6 +1345,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                 device=self.device,
                 use_tqdm=True,
                 memory_state=MemoryState.DISABLED,
+                use_tiling=use_tiling,
             )
 
     @torch.no_grad()
@@ -1353,6 +1358,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         loop: bool = False,
         use_tqdm: bool = True,
         memory_state: MemoryState = MemoryState.DISABLED,
+        use_tiling: bool = True,
     ) -> torch.Tensor | None:
         """
         :param hidden_states: hidden states tensor [B, C, T, H, W]
@@ -1361,6 +1367,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         :param tile_stride: tile stride
         :return: output tensor [B, C, T, H, W]
         """
+        if not use_tiling:
+            return self._decode(hidden_states, memory_state=memory_state)
+
         hidden_states = hidden_states.to(dtype=self.dtype)
         _, _, T, H, W = hidden_states.shape
         size_h, size_w = tile_size
@@ -1516,6 +1525,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         tile_stride: tuple[int, int] = DEFAULT_PIXEL_TILE_STRIDE,
         use_tqdm: bool = True,
         memory_state: MemoryState = MemoryState.DISABLED,
+        use_tiling: bool = True,
     ) -> torch.Tensor:
         """
         :param video: video tensor [B, C, T, H, W]
@@ -1524,6 +1534,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         :param tile_stride: tile stride
         :return: output tensor [B, C, T, H, W]
         """
+        if not use_tiling:
+            return self._encode(video, memory_state=memory_state)
+
         if device is None:
             device = self.device
 
@@ -1808,17 +1821,17 @@ class VideoAutoencoderKLWrapper(
         x = self.decode(z).sample
         return CausalAutoencoderOutput(x, z, p)
 
-    def encode(self, x: torch.FloatTensor) -> CausalEncoderOutput:
+    def encode(self, x: torch.FloatTensor, use_tiling: bool = True) -> CausalEncoderOutput:
         if x.ndim == 4:
             x = x.unsqueeze(2)
-        p = super().encode(x).latent_dist
+        p = super().encode(x, use_tiling=use_tiling).latent_dist
         z = p.sample().squeeze(2)
         return CausalEncoderOutput(z, p)
 
-    def decode(self, z: torch.FloatTensor) -> CausalDecoderOutput:
+    def decode(self, z: torch.FloatTensor, use_tiling: bool = True) -> CausalDecoderOutput:
         if z.ndim == 4:
             z = z.unsqueeze(2)
-        x = super().decode(z).sample.squeeze(2)
+        x = super().decode(z, use_tiling=use_tiling).sample.squeeze(2)
         return CausalDecoderOutput(x)
 
     def preprocess(self, x: torch.Tensor):
