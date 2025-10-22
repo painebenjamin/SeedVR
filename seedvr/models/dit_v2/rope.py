@@ -13,13 +13,12 @@
 # // limitations under the License.
 
 from functools import lru_cache
-from typing import Optional, Tuple
+
 import torch
 from einops import rearrange
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
-from torch import nn
-
 from seedvr.common.cache import Cache
+from torch import nn
 
 
 class RotaryEmbeddingBase(nn.Module):
@@ -55,8 +54,8 @@ class RotaryEmbedding3d(RotaryEmbeddingBase):
         self,
         q: torch.FloatTensor,  # b h l d
         k: torch.FloatTensor,  # b h l d
-        size: Tuple[int, int, int],
-    ) -> Tuple[
+        size: tuple[int, int, int],
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
     ]:
@@ -98,7 +97,7 @@ class NaMMRotaryEmbedding3d(MMRotaryEmbeddingBase):
         txt_k: torch.FloatTensor,  # L h d
         txt_shape: torch.LongTensor,  # B 1
         cache: Cache,
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
         torch.FloatTensor,
@@ -127,7 +126,7 @@ class NaMMRotaryEmbedding3d(MMRotaryEmbeddingBase):
         self,
         vid_shape: torch.LongTensor,
         txt_shape: torch.LongTensor,
-    ) -> Tuple[
+    ) -> tuple[
         torch.Tensor,
         torch.Tensor,
     ]:
@@ -142,7 +141,7 @@ class NaMMRotaryEmbedding3d(MMRotaryEmbeddingBase):
         return torch.cat(vid_freq_list, dim=0), torch.cat(txt_freq_list, dim=0)
 
 
-def get_na_rope(rope_type: Optional[str], dim: int):
+def get_na_rope(rope_type: str | None, dim: int):
     if rope_type is None:
         return None
     if rope_type == "mmrope3d":

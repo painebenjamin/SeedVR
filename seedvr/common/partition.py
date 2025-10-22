@@ -16,10 +16,10 @@
 Partition utility functions.
 """
 
-from typing import Any, List
+from typing import Any
 
 
-def partition_by_size(data: List[Any], size: int) -> List[List[Any]]:
+def partition_by_size(data: list[Any], size: int) -> list[list[Any]]:
     """
     Partition a list by size.
     When indivisible, the last group contains fewer items than the target size.
@@ -33,7 +33,7 @@ def partition_by_size(data: List[Any], size: int) -> List[List[Any]]:
     return [data[i : (i + size)] for i in range(0, len(data), size)]
 
 
-def partition_by_groups(data: List[Any], groups: int) -> List[List[Any]]:
+def partition_by_groups(data: list[Any], groups: int) -> list[list[Any]]:
     """
     Partition a list by groups.
     When indivisible, some groups may have more items than others.
@@ -47,7 +47,7 @@ def partition_by_groups(data: List[Any], groups: int) -> List[List[Any]]:
     return [data[i::groups] for i in range(groups)]
 
 
-def shift_list(data: List[Any], n: int) -> List[Any]:
+def shift_list(data: list[Any], n: int) -> list[Any]:
     """
     Rotate a list by n elements.
 

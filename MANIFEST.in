@@ -1,0 +1,28 @@
+# Include important documentation files
+include LICENSE
+include README.md
+include readme.md
+include requirements.txt
+include pyproject.toml
+
+# Include configuration files
+recursive-include configs_3b *.yaml
+recursive-include configs_7b *.yaml
+
+# Include data files
+recursive-include seedvr/data *.pt
+recursive-include seedvr/models *.yaml
+
+# Include assets
+recursive-include assets *.png
+
+# Exclude unnecessary files
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store
+global-exclude *.swp
+global-exclude *.swo
+
+
+

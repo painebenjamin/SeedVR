@@ -12,13 +12,13 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Callable, List, Optional
+from collections.abc import Callable
+
 import torch
 from einops import rearrange
-from torch import nn
-
 from seedvr.common.cache import Cache
 from seedvr.common.distributed.ops import slice_inputs
+from torch import nn
 
 # (dim: int, emb_dim: int)
 ada_layer_type = Callable[[int, int], nn.Module]
@@ -45,7 +45,7 @@ class AdaSingle(nn.Module):
         self,
         dim: int,
         emb_dim: int,
-        layers: List[str],
+        layers: list[str],
     ):
         assert emb_dim == 6 * dim, "AdaSingle requires emb_dim == 6 * dim"
         super().__init__()
@@ -53,9 +53,15 @@ class AdaSingle(nn.Module):
         self.emb_dim = emb_dim
         self.layers = layers
         for l in layers:
-            self.register_parameter(f"{l}_shift", nn.Parameter(torch.randn(dim) / dim**0.5))
-            self.register_parameter(f"{l}_scale", nn.Parameter(torch.randn(dim) / dim**0.5 + 1))
-            self.register_parameter(f"{l}_gate", nn.Parameter(torch.randn(dim) / dim**0.5))
+            self.register_parameter(
+                f"{l}_shift", nn.Parameter(torch.randn(dim) / dim**0.5)
+            )
+            self.register_parameter(
+                f"{l}_scale", nn.Parameter(torch.randn(dim) / dim**0.5 + 1)
+            )
+            self.register_parameter(
+                f"{l}_gate", nn.Parameter(torch.randn(dim) / dim**0.5)
+            )
 
     def forward(
         self,
@@ -65,17 +71,21 @@ class AdaSingle(nn.Module):
         mode: str,
         cache: Cache = Cache(disable=True),
         branch_tag: str = "",
-        hid_len: Optional[torch.LongTensor] = None,  # b
+        hid_len: torch.LongTensor | None = None,  # b
     ) -> torch.FloatTensor:
         idx = self.layers.index(layer)
-        emb = rearrange(emb, "b (d l g) -> b d l g", l=len(self.layers), g=3)[..., idx, :]
+        emb = rearrange(emb, "b (d l g) -> b d l g", l=len(self.layers), g=3)[
+            ..., idx, :
+        ]
         emb = expand_dims(emb, 1, hid.ndim + 1)
 
         if hid_len is not None:
             emb = cache(
                 f"emb_repeat_{idx}_{branch_tag}",
                 lambda: slice_inputs(
-                    torch.cat([e.repeat(l, *([1] * e.ndim)) for e, l in zip(emb, hid_len)]),
+                    torch.cat(
+                        [e.repeat(l, *([1] * e.ndim)) for e, l in zip(emb, hid_len)]
+                    ),
                     dim=0,
                 ),
             )

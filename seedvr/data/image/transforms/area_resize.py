@@ -14,7 +14,7 @@
 
 import math
 import random
-from typing import Union
+
 import torch
 from PIL import Image
 from torchvision.transforms import functional as TVF
@@ -32,7 +32,7 @@ class AreaResize:
         self.downsample_only = downsample_only
         self.interpolation = interpolation
 
-    def __call__(self, image: Union[torch.Tensor, Image.Image]):
+    def __call__(self, image: torch.Tensor | Image.Image):
 
         if isinstance(image, torch.Tensor):
             height, width = image.shape[-2:]
@@ -53,9 +53,10 @@ class AreaResize:
             size=(resized_height, resized_width),
             interpolation=self.interpolation,
         )
-    
+
+
 def area_resize(
-    image: Union[torch.Tensor, Image.Image],
+    image: torch.Tensor | Image.Image,
     scale: int,
     interpolation: InterpolationMode = InterpolationMode.BICUBIC,
     multiple_of: int = 16,
@@ -105,7 +106,7 @@ class AreaRandomCrop:
         j = random.randint(0, w - tw)
         return i, j, th, tw
 
-    def __call__(self, image: Union[torch.Tensor, Image.Image]):
+    def __call__(self, image: torch.Tensor | Image.Image):
         if isinstance(image, torch.Tensor):
             height, width = image.shape[-2:]
         elif isinstance(image, Image.Image):
@@ -125,6 +126,7 @@ class AreaRandomCrop:
         image = TVF.crop(image, i, j, h, w)
         return image
 
+
 class ScaleResize:
     def __init__(
         self,
@@ -132,7 +134,7 @@ class ScaleResize:
     ):
         self.scale = scale
 
-    def __call__(self, image: Union[torch.Tensor, Image.Image]):
+    def __call__(self, image: torch.Tensor | Image.Image):
         if isinstance(image, torch.Tensor):
             height, width = image.shape[-2:]
             interpolation_mode = InterpolationMode.BILINEAR

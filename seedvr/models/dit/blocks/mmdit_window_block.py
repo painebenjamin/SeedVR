@@ -12,20 +12,19 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Tuple, Union
+
 import torch
 from einops import rearrange
-from torch import nn
-from torch.nn import functional as F
-from torch.nn.modules.utils import _triple
-
 from seedvr.common.distributed.ops import (
     gather_heads,
     gather_heads_scatter_seq,
     gather_seq_scatter_heads_qkv,
     scatter_heads,
 )
-from seedvr.common.utils import safe_pad_operation, safe_interpolate_operation
+from seedvr.common.utils import safe_pad_operation
+from torch import nn
+from torch.nn.modules.utils import _triple
+
 from ..attention import TorchAttention
 from ..mlp import get_mlp
 from ..mm import MMArg, MMModule
@@ -45,7 +44,7 @@ class MMWindowAttention(nn.Module):
         qk_rope: bool,
         qk_norm: norm_layer_type,
         qk_norm_eps: float,
-        window: Union[int, Tuple[int, int, int]],
+        window: int | tuple[int, int, int],
         window_method: str,
         shared_qkv: bool,
     ):
@@ -59,10 +58,16 @@ class MMWindowAttention(nn.Module):
         assert all(map(lambda v: isinstance(v, int) and v >= 0, self.window))
 
         self.head_dim = head_dim
-        self.proj_qkv = MMModule(nn.Linear, dim, qkv_dim, bias=qk_bias, shared_weights=shared_qkv)
+        self.proj_qkv = MMModule(
+            nn.Linear, dim, qkv_dim, bias=qk_bias, shared_weights=shared_qkv
+        )
         self.proj_out = MMModule(nn.Linear, inner_dim, dim, shared_weights=shared_qkv)
-        self.norm_q = MMModule(qk_norm, dim=head_dim, eps=qk_norm_eps, elementwise_affine=True)
-        self.norm_k = MMModule(qk_norm, dim=head_dim, eps=qk_norm_eps, elementwise_affine=True)
+        self.norm_q = MMModule(
+            qk_norm, dim=head_dim, eps=qk_norm_eps, elementwise_affine=True
+        )
+        self.norm_k = MMModule(
+            qk_norm, dim=head_dim, eps=qk_norm_eps, elementwise_affine=True
+        )
         self.rope = RotaryEmbedding3d(dim=head_dim // 2) if qk_rope else None
         self.attn = TorchAttention()
 
@@ -71,7 +76,7 @@ class MMWindowAttention(nn.Module):
         vid: torch.FloatTensor,  # b T H W c
         txt: torch.FloatTensor,  # b L c
         txt_mask: torch.BoolTensor,  # b L
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
     ]:
@@ -95,7 +100,9 @@ class MMWindowAttention(nn.Module):
         else:
             raise NotImplementedError
 
-        vid_qkv = rearrange(vid_qkv, "b T H W (o h d) -> o b h (T H W) d", o=3, d=self.head_dim)
+        vid_qkv = rearrange(
+            vid_qkv, "b T H W (o h d) -> o b h (T H W) d", o=3, d=self.head_dim
+        )
         txt_qkv = rearrange(txt_qkv, "b L (o h d) -> o b h L d", o=3, d=self.head_dim)
         txt_qkv = scatter_heads(txt_qkv, dim=2)
 
@@ -121,11 +128,15 @@ class MMWindowAttention(nn.Module):
             )
 
         def txt_window(t):
-            return rearrange(t, "b h L d -> b h 1 L d").expand(-1, -1, nt * nh * nw, -1, -1)
+            return rearrange(t, "b h L d -> b h 1 L d").expand(
+                -1, -1, nt * nh * nw, -1, -1
+            )
 
         # Process video attention.
         vid_msk = safe_pad_operation(txt_mask, (tt * hh * ww, 0), value=True)
-        vid_msk = rearrange(vid_msk, "b l -> b 1 1 1 l").expand(-1, 1, 1, tt * hh * ww, -1)
+        vid_msk = rearrange(vid_msk, "b l -> b 1 1 1 l").expand(
+            -1, 1, 1, tt * hh * ww, -1
+        )
         vid_out = self.attn(
             vid_window(vid_q),
             torch.cat([vid_window(vid_k), txt_window(txt_k)], dim=-2),
@@ -176,7 +187,7 @@ class MMWindowTransformerBlock(nn.Module):
         qk_bias: bool,
         qk_rope: bool,
         qk_norm: norm_layer_type,
-        window: Union[int, Tuple[int, int, int]],
+        window: int | tuple[int, int, int],
         window_method: str,
         shared_qkv: bool,
         shared_mlp: bool,
@@ -214,14 +225,18 @@ class MMWindowTransformerBlock(nn.Module):
         txt: torch.FloatTensor,
         txt_mask: torch.BoolTensor,
         emb: torch.FloatTensor,
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
     ]:
         vid_attn, txt_attn = self.attn_norm(vid, txt)
-        vid_attn, txt_attn = self.ada(vid_attn, txt_attn, emb=emb, layer="attn", mode="in")
+        vid_attn, txt_attn = self.ada(
+            vid_attn, txt_attn, emb=emb, layer="attn", mode="in"
+        )
         vid_attn, txt_attn = self.attn(vid_attn, txt_attn, txt_mask=txt_mask)
-        vid_attn, txt_attn = self.ada(vid_attn, txt_attn, emb=emb, layer="attn", mode="out")
+        vid_attn, txt_attn = self.ada(
+            vid_attn, txt_attn, emb=emb, layer="attn", mode="out"
+        )
         vid_attn, txt_attn = (vid_attn + vid), (txt_attn + txt)
 
         vid_mlp, txt_mlp = self.mlp_norm(vid_attn, txt_attn)

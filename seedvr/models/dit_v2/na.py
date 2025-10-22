@@ -12,15 +12,16 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
+from collections.abc import Callable
 from itertools import chain
-from typing import Callable, Dict, List, Tuple
+
 import einops
 import torch
 
 
 def flatten(
-    hid: List[torch.FloatTensor],  # List of (*** c)
-) -> Tuple[
+    hid: list[torch.FloatTensor],  # List of (*** c)
+) -> tuple[
     torch.FloatTensor,  # (L c)
     torch.LongTensor,  # (b n)
 ]:
@@ -33,7 +34,7 @@ def flatten(
 def unflatten(
     hid: torch.FloatTensor,  # (L c) or (L ... c)
     hid_shape: torch.LongTensor,  # (b n)
-) -> List[torch.Tensor]:  # List of (*** c) or (*** ... c)
+) -> list[torch.Tensor]:  # List of (*** c) or (*** ... c)
     hid_len = hid_shape.prod(-1)
     hid = hid.split(hid_len.tolist())
     hid = [x.unflatten(0, s.tolist()) for x, s in zip(hid, hid_shape)]
@@ -54,7 +55,7 @@ def concat(
 def concat_idx(
     vid_len: torch.LongTensor,  # (b)
     txt_len: torch.LongTensor,  # (b)
-) -> Tuple[
+) -> tuple[
     Callable,
     Callable,
 ]:
@@ -65,7 +66,9 @@ def concat_idx(
     src_idx = torch.argsort(tgt_idx)
     return (
         lambda vid, txt: torch.index_select(torch.cat([vid, txt]), 0, tgt_idx),
-        lambda all: torch.index_select(all, 0, src_idx).split([len(vid_idx), len(txt_idx)]),
+        lambda all: torch.index_select(all, 0, src_idx).split(
+            [len(vid_idx), len(txt_idx)]
+        ),
     )
 
 
@@ -73,7 +76,7 @@ def unconcat(
     all: torch.FloatTensor,  # (L ... c)
     vid_len: torch.LongTensor,  # (b)
     txt_len: torch.LongTensor,  # (b)
-) -> Tuple[
+) -> tuple[
     torch.FloatTensor,  # (VL ... c)
     torch.FloatTensor,  # (TL ... c)
 ]:
@@ -89,7 +92,7 @@ def repeat_concat(
     txt: torch.FloatTensor,  # (TL ... c)
     vid_len: torch.LongTensor,  # (n*b)
     txt_len: torch.LongTensor,  # (b)
-    txt_repeat: List,  # (n)
+    txt_repeat: list,  # (n)
 ) -> torch.FloatTensor:  # (L ... c)
     vid = torch.split(vid, vid_len.tolist())
     txt = torch.split(txt, txt_len.tolist())
@@ -102,7 +105,7 @@ def repeat_concat_idx(
     vid_len: torch.LongTensor,  # (n*b)
     txt_len: torch.LongTensor,  # (b)
     txt_repeat: torch.LongTensor,  # (n)
-) -> Tuple[
+) -> tuple[
     Callable,
     Callable,
 ]:
@@ -144,20 +147,24 @@ def rearrange(
     hid: torch.FloatTensor,  # (L c)
     hid_shape: torch.LongTensor,  # (b n)
     pattern: str,
-    **kwargs: Dict[str, int],
-) -> Tuple[
+    **kwargs: dict[str, int],
+) -> tuple[
     torch.FloatTensor,
     torch.LongTensor,
 ]:
-    return flatten([einops.rearrange(h, pattern, **kwargs) for h in unflatten(hid, hid_shape)])
+    return flatten(
+        [einops.rearrange(h, pattern, **kwargs) for h in unflatten(hid, hid_shape)]
+    )
 
 
 def rearrange_idx(
     hid_shape: torch.LongTensor,  # (b n)
     pattern: str,
-    **kwargs: Dict[str, int],
-) -> Tuple[Callable, Callable, torch.LongTensor]:
-    hid_idx = torch.arange(hid_shape.prod(-1).sum(), device=hid_shape.device).unsqueeze(-1)
+    **kwargs: dict[str, int],
+) -> tuple[Callable, Callable, torch.LongTensor]:
+    hid_idx = torch.arange(hid_shape.prod(-1).sum(), device=hid_shape.device).unsqueeze(
+        -1
+    )
     tgt_idx, tgt_shape = rearrange(hid_idx, hid_shape, pattern, **kwargs)
     tgt_idx = tgt_idx.squeeze(-1)
     src_idx = torch.argsort(tgt_idx)
@@ -172,8 +179,8 @@ def repeat(
     hid: torch.FloatTensor,  # (L c)
     hid_shape: torch.LongTensor,  # (b n)
     pattern: str,
-    **kwargs: Dict[str, torch.LongTensor],  # (b)
-) -> Tuple[
+    **kwargs: dict[str, torch.LongTensor],  # (b)
+) -> tuple[
     torch.FloatTensor,
     torch.LongTensor,
 ]:
@@ -183,10 +190,10 @@ def repeat(
 
 
 def pack(
-    samples: List[torch.Tensor],  # List of (h w c).
-) -> Tuple[
-    List[torch.Tensor],  # groups [(b1 h1 w1 c1), (b2 h2 w2 c2)]
-    List[List[int]],  # reversal indices.
+    samples: list[torch.Tensor],  # List of (h w c).
+) -> tuple[
+    list[torch.Tensor],  # groups [(b1 h1 w1 c1), (b2 h2 w2 c2)]
+    list[list[int]],  # reversal indices.
 ]:
     batches = {}
     indices = {}
@@ -203,9 +210,9 @@ def pack(
 
 
 def unpack(
-    batches: List[torch.Tensor],
-    indices: List[List[int]],
-) -> List[torch.Tensor]:
+    batches: list[torch.Tensor],
+    indices: list[list[int]],
+) -> list[torch.Tensor]:
     samples = [None] * (max(chain(*indices)) + 1)
     for batch, index in zip(batches, indices):
         for sample, i in zip(batch.unbind(), index):
@@ -216,7 +223,7 @@ def unpack(
 def window(
     hid: torch.FloatTensor,  # (L c)
     hid_shape: torch.LongTensor,  # (b n)
-    window_fn: Callable[[torch.Tensor], List[torch.Tensor]],
+    window_fn: Callable[[torch.Tensor], list[torch.Tensor]],
 ):
     hid = unflatten(hid, hid_shape)
     hid = list(map(window_fn, hid))
@@ -227,9 +234,11 @@ def window(
 
 def window_idx(
     hid_shape: torch.LongTensor,  # (b n)
-    window_fn: Callable[[torch.Tensor], List[torch.Tensor]],
+    window_fn: Callable[[torch.Tensor], list[torch.Tensor]],
 ):
-    hid_idx = torch.arange(hid_shape.prod(-1).sum(), device=hid_shape.device).unsqueeze(-1)
+    hid_idx = torch.arange(hid_shape.prod(-1).sum(), device=hid_shape.device).unsqueeze(
+        -1
+    )
     tgt_idx, tgt_shape, tgt_windows = window(hid_idx, hid_shape, window_fn)
     tgt_idx = tgt_idx.squeeze(-1)
     src_idx = torch.argsort(tgt_idx)

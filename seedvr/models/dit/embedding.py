@@ -12,13 +12,13 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Optional, Union
+
 import torch
 from diffusers.models.embeddings import get_timestep_embedding
 from torch import nn
 
 
-def emb_add(emb1: torch.Tensor, emb2: Optional[torch.Tensor]):
+def emb_add(emb1: torch.Tensor, emb2: torch.Tensor | None):
     return emb1 if emb2 is None else emb1 + emb2
 
 
@@ -38,7 +38,7 @@ class TimeEmbedding(nn.Module):
 
     def forward(
         self,
-        timestep: Union[int, float, torch.IntTensor, torch.FloatTensor],
+        timestep: int | float | torch.IntTensor | torch.FloatTensor,
         device: torch.device,
         dtype: torch.dtype,
     ) -> torch.FloatTensor:

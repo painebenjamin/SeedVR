@@ -12,7 +12,7 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Union
+
 import torch
 from PIL import Image
 from torchvision.transforms import InterpolationMode
@@ -30,7 +30,7 @@ class SideResize:
         self.downsample_only = downsample_only
         self.interpolation = interpolation
 
-    def __call__(self, image: Union[torch.Tensor, Image.Image]):
+    def __call__(self, image: torch.Tensor | Image.Image):
         """
         Args:
             image (PIL Image or Tensor): Image to be scaled.

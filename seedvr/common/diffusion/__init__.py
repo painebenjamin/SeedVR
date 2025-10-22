@@ -28,7 +28,11 @@ from .schedules.lerp import LinearInterpolationSchedule
 from .timesteps.base import SamplingTimesteps, Timesteps
 from .timesteps.sampling.trailing import UniformTrailingSamplingTimesteps
 from .types import PredictionType, SamplingDirection
-from .utils import classifier_free_guidance, classifier_free_guidance_dispatcher, expand_dims
+from .utils import (
+    classifier_free_guidance,
+    classifier_free_guidance_dispatcher,
+    expand_dims,
+)
 
 __all__ = [
     # Configs

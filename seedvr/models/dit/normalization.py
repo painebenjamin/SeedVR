@@ -12,14 +12,15 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Callable, Optional
-from diffusers.models.normalization import RMSNorm
-from torch import nn
+import numbers
+from collections.abc import Callable
+
 import torch
 import torch.nn.functional as F
-import numbers
-from torch.nn.parameter import Parameter
+from diffusers.models.normalization import RMSNorm
+from torch import nn
 from torch.nn import init
+from torch.nn.parameter import Parameter
 
 # (dim: int, eps: float, elementwise_affine: bool)
 norm_layer_type = Callable[[int, float, bool], nn.Module]
@@ -29,21 +30,22 @@ class CustomLayerNorm(nn.Module):
     """
     Custom LayerNorm implementation to replace Apex FusedLayerNorm
     """
+
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
-        super(CustomLayerNorm, self).__init__()
-        
+        super().__init__()
+
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
         self.normalized_shape = torch.Size(normalized_shape)
         self.eps = eps
         self.elementwise_affine = elementwise_affine
-        
+
         if self.elementwise_affine:
             self.weight = Parameter(torch.Tensor(*normalized_shape))
             self.bias = Parameter(torch.Tensor(*normalized_shape))
         else:
-            self.register_parameter('weight', None)
-            self.register_parameter('bias', None)
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -53,44 +55,46 @@ class CustomLayerNorm(nn.Module):
 
     def forward(self, input):
         return F.layer_norm(
-            input, self.normalized_shape, self.weight, self.bias, self.eps)
+            input, self.normalized_shape, self.weight, self.bias, self.eps
+        )
 
 
 class CustomRMSNorm(nn.Module):
     """
     Custom RMSNorm implementation to replace Apex FusedRMSNorm
     """
+
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
-        super(CustomRMSNorm, self).__init__()
-        
+        super().__init__()
+
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
         self.normalized_shape = torch.Size(normalized_shape)
         self.eps = eps
         self.elementwise_affine = elementwise_affine
-        
+
         if self.elementwise_affine:
             self.weight = Parameter(torch.ones(*normalized_shape))
         else:
-            self.register_parameter('weight', None)
+            self.register_parameter("weight", None)
 
     def forward(self, input):
         # RMS normalization: x / sqrt(mean(x^2) + eps) * weight
         dims = tuple(range(-len(self.normalized_shape), 0))
-        
+
         # Calculate RMS: sqrt(mean(x^2))
         variance = input.pow(2).mean(dim=dims, keepdim=True)
         rms = torch.sqrt(variance + self.eps)
-        
+
         # Normalize
         normalized = input / rms
-        
+
         if self.elementwise_affine:
             return normalized * self.weight
         return normalized
 
 
-def get_norm_layer(norm_type: Optional[str]) -> norm_layer_type:
+def get_norm_layer(norm_type: str | None) -> norm_layer_type:
 
     def _norm_layer(dim: int, eps: float, elementwise_affine: bool):
         if norm_type is None:

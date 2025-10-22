@@ -19,10 +19,14 @@ Decorators.
 import functools
 import threading
 import time
-from typing import Callable
-import torch
+from collections.abc import Callable
 
-from seedvr.common.distributed import barrier_if_distributed, get_global_rank, get_local_rank
+import torch
+from seedvr.common.distributed import (
+    barrier_if_distributed,
+    get_global_rank,
+    get_local_rank,
+)
 from seedvr.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -69,7 +73,9 @@ def _conditional_execute_wrapper_factory(execute: bool, func: Callable) -> Calla
     return conditional_execute_wrapper
 
 
-def _asserted_wrapper_factory(condition: bool, func: Callable, err_msg: str = "") -> Callable:
+def _asserted_wrapper_factory(
+    condition: bool, func: Callable, err_msg: str = ""
+) -> Callable:
     """
     Helper function for some functions with special constraints,
     especially functions called by other global_rank_zero_only / local_rank_zero_only ones,
@@ -103,7 +109,9 @@ def assert_only_global_rank_zero(func: Callable) -> Callable:
     Functions with this decorator are only accessible to processes with global rank zero.
     """
     return _asserted_wrapper_factory(
-        get_global_rank() == 0, func, err_msg="Not accessible to processes with global_rank != 0"
+        get_global_rank() == 0,
+        func,
+        err_msg="Not accessible to processes with global_rank != 0",
     )
 
 
@@ -112,7 +120,9 @@ def assert_only_local_rank_zero(func: Callable) -> Callable:
     Functions with this decorator are only accessible to processes with local rank zero.
     """
     return _asserted_wrapper_factory(
-        get_local_rank() == 0, func, err_msg="Not accessible to processes with local_rank != 0"
+        get_local_rank() == 0,
+        func,
+        err_msg="Not accessible to processes with local_rank != 0",
     )
 
 
@@ -141,7 +151,9 @@ def log_runtime(func: Callable) -> Callable:
         start = time.perf_counter()
         result = func(*args, **kwargs)
         torch.distributed.barrier()
-        logger.info(f"Completed {func.__name__} in {time.perf_counter() - start:.3f} seconds.")
+        logger.info(
+            f"Completed {func.__name__} in {time.perf_counter() - start:.3f} seconds."
+        )
         return result
 
     return wrapped

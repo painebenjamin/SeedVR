@@ -6,7 +6,12 @@ import torch
 import torch.nn as nn
 from diffusers.models.model_loading_utils import load_state_dict
 
-from ..common.utils import get_torch_device, get_torch_dtype, no_init_weights, filter_kwargs_for_method
+from ..common.utils import (
+    filter_kwargs_for_method,
+    get_torch_device,
+    get_torch_dtype,
+    no_init_weights,
+)
 
 __all__ = [
     "PretrainedMixin",

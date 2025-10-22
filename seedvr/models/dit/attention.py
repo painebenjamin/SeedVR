@@ -17,21 +17,25 @@ import torch.nn.functional as F
 
 try:
     from flash_attn_interface import flash_attn_varlen_func
+
     print("Using FlashAttention3")
 except ImportError:
     try:
         from flash_attn import flash_attn_varlen_func
+
         print("Using FlashAttention2")
     except ImportError:
         print("Using PyTorch Attention")
         flash_attn_varlen_func = None
 
-from ...common.utils import filter_kwargs_for_method
 from torch import nn
+
 
 class TorchAttention(nn.Module):
     def tflops(self, args, kwargs, output) -> float:
-        assert len(args) == 0 or len(args) > 2, "query, key should both provided by args / kwargs"
+        assert (
+            len(args) == 0 or len(args) > 2
+        ), "query, key should both provided by args / kwargs"
         q = kwargs.get("query") or args[0]
         k = kwargs.get("key") or args[1]
         b, h, sq, d = q.shape

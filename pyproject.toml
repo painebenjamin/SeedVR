@@ -1,0 +1,153 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "seedvr"
+version = "1.0.0"
+description = "SeedVR: Seeding Infinity in Diffusion Transformer Towards Generic Video Restoration"
+readme = "readme.md"
+requires-python = ">=3.9,<3.11"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Jianyi Wang", email = "iceclear@bytedance.com"},
+    {name = "Zhijie Lin"},
+    {name = "Meng Wei"},
+    {name = "Ceyuan Yang"},
+    {name = "Fei Xiao"},
+    {name = "Chen Change Loy"},
+    {name = "Lu Jiang"},
+]
+maintainers = [
+    {name = "ByteDance Seed Team"},
+]
+keywords = [
+    "video-restoration",
+    "diffusion-models",
+    "video-generation",
+    "computer-vision",
+    "deep-learning",
+    "pytorch",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Multimedia :: Video",
+]
+
+# Core dependencies
+dependencies = [
+    "apex",
+    "einops",
+    "omegaconf",
+    "opencv-python",
+    "diffusers",
+    "rotary-embedding-torch",
+    "transformers",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+
+[project.optional-dependencies]
+# Development dependencies
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+# Full installation with flash attention and apex
+full = [
+    "flash-attn==2.5.9.post1",
+    # Note: apex needs to be installed manually from source or pre-built wheel
+    # See: https://github.com/NVIDIA/apex
+]
+
+# For downloading models
+hub = [
+    "huggingface-hub>=0.16.0",
+]
+
+# All optional dependencies
+all = [
+    "seedvr[dev,hub]",
+]
+
+[project.urls]
+Homepage = "https://iceclear.github.io/projects/seedvr/"
+"SeedVR2 Homepage" = "https://iceclear.github.io/projects/seedvr2/"
+Repository = "https://github.com/bytedance-seed/SeedVR"
+"Bug Tracker" = "https://github.com/bytedance-seed/SeedVR/issues"
+Documentation = "https://iceclear.github.io/projects/seedvr/"
+"HuggingFace Models" = "https://huggingface.co/collections/ByteDance-Seed/seedvr-6849deeb461c4e425f3e6f9e"
+"HuggingFace Space" = "https://huggingface.co/spaces/ByteDance-Seed/SeedVR2-3B"
+"Paper (SeedVR)" = "https://arxiv.org/abs/2501.01320"
+"Paper (SeedVR2)" = "http://arxiv.org/abs/2506.05301"
+"ComfyUI Integration" = "https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler"
+
+[tool.setuptools]
+packages = ["seedvr"]
+
+[tool.setuptools.package-data]
+seedvr = [
+    "data/*.pt",
+    "models/**/*.yaml",
+    "**/*.yaml",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | \.eggs
+  | \.tox
+  | build
+  | dist
+  | __pycache__
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+known_first_party = ["seedvr"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--verbose",
+    "--color=yes",
+    "--cov=seedvr",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+
+
+

@@ -18,7 +18,6 @@ Logging utility functions.
 
 import logging
 import sys
-from typing import Optional
 
 from seedvr.common.distributed import get_global_rank, get_local_rank, get_world_size
 
@@ -34,7 +33,7 @@ _default_handler.setFormatter(
 )
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     Get a logger.
     """

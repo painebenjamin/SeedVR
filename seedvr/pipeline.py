@@ -1,57 +1,36 @@
-from typing import List, Optional, Tuple, Union, Any, Callable
-import torch
+import math
 import os
 import random
-import math
+from collections.abc import Callable
+from typing import Any, Optional
+
+import torch
+from diffusers.configuration_utils import register_to_config
 from einops import rearrange
+from flashpack.integrations.diffusers import FlashPackDiffusionPipeline
+from huggingface_hub import snapshot_download
 from omegaconf import DictConfig, ListConfig
 from torch import Tensor
 
-from huggingface_hub import snapshot_download
-from flashpack.integrations.diffusers import FlashPackDiffusionPipeline
-from diffusers.configuration_utils import register_to_config
-
-from seedvr.common.config import create_object
-from seedvr.common.decorators import log_on_entry
 from seedvr.common.diffusion import (
     classifier_free_guidance_dispatcher,
     create_sampler_from_config,
-    create_sampling_timesteps_from_config,
-    create_schedule_from_config,
 )
-from seedvr.common.distributed import (
-    get_device,
-    get_global_rank,
-    get_world_size,
-)
-from seedvr.common.distributed.advanced import (
-    get_data_parallel_rank,
-    get_data_parallel_world_size,
-    get_sequence_parallel_rank,
-    get_sequence_parallel_world_size,
-    init_sequence_parallel,
-)
-from seedvr.common.utils import filter_kwargs_for_method, maybe_use_tqdm
-from seedvr.models.dit.na import flatten, unflatten, pack, unpack
-from seedvr.models.dit.nadit import NaDiT
-from seedvr.models.video_vae_v3.modules.attn_video_vae import VideoAutoencoderKLWrapper
-from seedvr.models.embeds import PrecomputedEmbeddings
-from seedvr.common.diffusion.schedules.base import Schedule
-from seedvr.common.diffusion.timesteps.base import SamplingTimesteps
 from seedvr.common.diffusion.samplers.base import Sampler
-from seedvr.common.diffusion.types import PredictionType
-from seedvr.common.distributed.meta_init_utils import (
-    meta_non_persistent_buffer_init_fn,
-)
+from seedvr.common.distributed import get_device
+from seedvr.common.utils import filter_kwargs_for_method, maybe_use_tqdm
 from seedvr.data.image.transforms.area_resize import area_resize
-from seedvr.data.image.transforms.divisible_crop import DivisibleCrop
-from seedvr.data.video.transforms.rearrange import Rearrange
-# from common.fs import download
-
+from seedvr.models.dit.na import flatten, pack, unflatten, unpack
+from seedvr.models.dit.nadit import NaDiT
+from seedvr.models.embeds import PrecomputedEmbeddings
+from seedvr.models.video_vae_v3.modules.attn_video_vae import VideoAutoencoderKLWrapper
+from seedvr.models.video_vae_v3.modules.causal_inflation_lib import InflatedCausalConv3d
 from seedvr.projects.video_diffusion_sr.color_fix import (
     get_wavelet_kernel,
     wavelet_reconstruction,
 )
+
+# from common.fs import download
 
 
 class SeedVRPipeline(FlashPackDiffusionPipeline):
@@ -65,7 +44,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         transform_timesteps: bool = True,
     ) -> None:
         super().__init__()
-        embeds = embeds or PrecomputedEmbeddings.default(device=get_device(), dtype=dit.dtype)
+        embeds = embeds or PrecomputedEmbeddings.default(
+            device=get_device(), dtype=dit.dtype
+        )
         self.register_modules(
             dit=dit,
             vae=vae,
@@ -73,8 +54,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             embeds=embeds,
         )
         self.wavelet_kernel = get_wavelet_kernel(
-            self.vae.dtype,
-            in_device=self.dit.device
+            self.vae.dtype, in_device=self.dit.device
         )
         self.transform_timesteps = transform_timesteps
 
@@ -125,7 +105,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         if not os.path.isdir(pretrained_model_name_or_path):
             download_kwargs = filter_kwargs_for_method(snapshot_download, kwargs)
             download_kwargs["allow_patterns"] = [dit_filename, vae_filename]
-            pretrained_model_name_or_path = snapshot_download(pretrained_model_name_or_path, **download_kwargs)
+            pretrained_model_name_or_path = snapshot_download(
+                pretrained_model_name_or_path, **download_kwargs
+            )
 
         dit_path = os.path.join(pretrained_model_name_or_path, dit_filename)
         vae_path = os.path.join(pretrained_model_name_or_path, vae_filename)
@@ -133,7 +115,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         dit = NaDiT.from_single_file(dit_path, device=device)
         vae = VideoAutoencoderKLWrapper.from_single_file(vae_path, device=device)
         sampler = create_sampler_from_config(
-            config=DictConfig({"type": sampler_type, "prediction_type": sampler_prediction_type}),
+            config=DictConfig(
+                {"type": sampler_type, "prediction_type": sampler_prediction_type}
+            ),
             schedule_type=schedule_type,
             schedule_t=schedule_t,
             timesteps_type=timesteps_sampling_type,
@@ -143,7 +127,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         return cls(dit=dit, vae=vae, sampler=sampler)
 
     @torch.no_grad()
-    def vae_encode(self, samples: List[Tensor], use_sample: bool = True) -> List[Tensor]:
+    def vae_encode(
+        self, samples: list[Tensor], use_sample: bool = True
+    ) -> list[Tensor]:
         latents = []
         if len(samples) > 0:
             device = get_device()
@@ -186,7 +172,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         return latents
 
     @torch.no_grad()
-    def vae_decode(self, latents: List[Tensor]) -> List[Tensor]:
+    def vae_decode(self, latents: list[Tensor]) -> list[Tensor]:
         samples = []
         if len(latents) > 0:
             device = get_device()
@@ -224,16 +210,15 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
 
         return samples
 
-
     @torch.no_grad()
     def inference(
         self,
-        noises: List[Tensor],
-        conditions: List[Tensor],
+        noises: list[Tensor],
+        conditions: list[Tensor],
         cfg_scale: float,
         cfg_rescale: float = 0.0,
         dit_offload: bool = False,
-    ) -> List[Tensor]:
+    ) -> list[Tensor]:
         assert len(noises) == len(conditions)
         batch_size = len(noises)
 
@@ -241,7 +226,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         if batch_size == 0:
             return []
 
-        (text_pos_embeds, text_pos_shapes), (text_neg_embeds, text_neg_shapes) = self.embeds.get()
+        (text_pos_embeds, text_pos_shapes), (text_neg_embeds, text_neg_shapes) = (
+            self.embeds.get()
+        )
         latents, latents_shapes = flatten(noises)
         latents_cond, _ = flatten(conditions)
 
@@ -269,8 +256,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 ).vid_sample,
                 scale=(
                     cfg_scale
-                    if (args.i + 1) / len(self.sampler.timesteps)
-                    <= 1.0
+                    if (args.i + 1) / len(self.sampler.timesteps) <= 1.0
                     else 1.0
                 ),
                 rescale=cfg_rescale,
@@ -289,7 +275,9 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
 
         return samples
 
-    def get_linear_shift_function(self, x1: float, y1: float, x2: float, y2: float) -> Callable[[float], float]:
+    def get_linear_shift_function(
+        self, x1: float, y1: float, x2: float, y2: float
+    ) -> Callable[[float], float]:
         """
         Get a linear shift function.
         """
@@ -363,12 +351,20 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             generator=generator,
         )
 
+    def _clear_module_memory(self, module: torch.nn.Module) -> None:
+        if isinstance(module, InflatedCausalConv3d):
+            module.memory = None
+        for child in module.children():
+            self._clear_module_memory(child)
+
+    def _clear_vae_memory(self) -> None:
+        self._clear_module_memory(self.vae)
+
     @torch.no_grad()
     def __call__(
         self,
         media: torch.Tensor,
-        width: int,
-        height: int,
+        target_area: int,
         cfg_scale: float = 1.0,
         cfg_rescale: float = 1.0,
         seed: int | None = None,
@@ -394,11 +390,10 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
 
         # Set up reproducibility.
         if seed is None:
-            seed = random.randint(0, 2**32-1)
+            seed = random.randint(0, 2**32 - 1)
 
         generator = torch.Generator(device=get_device()).manual_seed(seed)
         # Prepare media for inference.
-        target_area = height * width
         media_area = h * w
         scale = math.sqrt(target_area / media_area)
         media = area_resize(media, scale)
@@ -414,16 +409,20 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             desc="Upsampling",
             use_tqdm=use_tqdm,
         ):
-            batch_media = media[:, batch_idx:batch_idx + batch_size]
+            batch_media = media[:, batch_idx : batch_idx + batch_size]
             num_padded_frames = 0
             if batch_media.shape[1] % 4 != 1:
                 num_padded_frames = 4 - (batch_media.shape[1] % 4) + 1
-                batch_media = torch.cat([batch_media] + [batch_media[:, -1:]] * num_padded_frames, dim=1)
+                batch_media = torch.cat(
+                    [batch_media] + [batch_media[:, -1:]] * num_padded_frames, dim=1
+                )
 
             latents = self.vae_encode([batch_media])
             latents = [latent.to(self.dit.dtype) for latent in latents]
             noises = [self.random_seeded_like(latent, generator) for latent in latents]
-            aug_noises = [self.random_seeded_like(latent, generator) for latent in latents]
+            aug_noises = [
+                self.random_seeded_like(latent, generator) for latent in latents
+            ]
             conditions = [
                 self.get_condition(
                     noise,
@@ -439,39 +438,43 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 cfg_rescale,
             )
             samples = [
-                sample.unsqueeze(1)
-                if sample.ndim == 3
-                else sample
+                sample.unsqueeze(1) if sample.ndim == 3 else sample
                 for sample in samples
             ]
 
-            batch_media = rearrange(batch_media, "c t h w -> t c h w").to(self.wavelet_kernel.device, dtype=self.wavelet_kernel.dtype)
+            batch_media = rearrange(batch_media, "c t h w -> t c h w").to(
+                self.wavelet_kernel.device, dtype=self.wavelet_kernel.dtype
+            )
             samples = [
-                rearrange(sample, "c t h w -> t c h w").to(self.wavelet_kernel.device, dtype=self.wavelet_kernel.dtype)
+                rearrange(sample, "c t h w -> t c h w").to(
+                    self.wavelet_kernel.device, dtype=self.wavelet_kernel.dtype
+                )
                 for sample in samples
             ]
-            print(f"Samples shape: {samples[0].shape} {num_padded_frames=} {batch_media.shape=}")
             if num_padded_frames > 0:
                 batch_media = batch_media[:-num_padded_frames]
-                samples = [
-                    sample[:-num_padded_frames]
-                    for sample in samples
-                ]
+                samples = [sample[:-num_padded_frames] for sample in samples]
             samples = [
                 wavelet_reconstruction(sample, batch_media, self.wavelet_kernel)
                 for sample in samples
             ]
             samples = [
-                sample.clamp(-1.0, 1.0).mul_(0.5).add_(0.5).mul_(255).round().to(torch.uint8).detach().cpu()
+                sample.clamp(-1.0, 1.0)
+                .mul_(0.5)
+                .add_(0.5)
+                .mul_(255)
+                .round()
+                .to(torch.uint8)
+                .detach()
+                .cpu()
                 for sample in samples
             ]
             if batch_idx > 0 and overlap > 0:
                 samples = [sample[overlap:] for sample in samples]
 
             output_samples.append(samples)
+            self._clear_vae_memory()
 
-        output_samples = [
-            torch.cat(samples, dim=0)
-            for samples in zip(*output_samples)
-        ]
+        output_samples = [torch.cat(samples, dim=0) for samples in zip(*output_samples)]
+        torch.cuda.empty_cache()
         return output_samples

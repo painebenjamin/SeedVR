@@ -1,13 +1,7 @@
 import torch
-import tempfile
-import os
-
-from typing import Tuple
 from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
-
-from .utils import PretrainedMixin
-from ..common.utils import read_from_url
 from .dit.na import flatten
+from .utils import PretrainedMixin
 
 
 class PrecomputedEmbeddings(PretrainedMixin, FlashPackDiffusersModelMixin):
@@ -18,9 +12,13 @@ class PrecomputedEmbeddings(PretrainedMixin, FlashPackDiffusersModelMixin):
     ) -> None:
         super().__init__()
         self.register_buffer("positive", positive)
-        self.register_buffer("negative", negative if negative is not None else torch.zeros_like(positive))
+        self.register_buffer(
+            "negative", negative if negative is not None else torch.zeros_like(positive)
+        )
 
-    def get(self) -> Tuple[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+    def get(
+        self,
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]:
         """
         Get the precomputed embeddings.
         """
@@ -36,6 +34,7 @@ class PrecomputedEmbeddings(PretrainedMixin, FlashPackDiffusersModelMixin):
         Load the default precomputed embeddings from the Hugging Face Hub.
         """
         from seedvr.data import NEG_EMB_PATH, POS_EMB_PATH
+
         positive = torch.load(POS_EMB_PATH)
         negative = torch.load(NEG_EMB_PATH)
         embeddings = cls(positive, negative)

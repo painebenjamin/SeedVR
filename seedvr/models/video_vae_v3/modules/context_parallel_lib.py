@@ -12,16 +12,11 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import List
+
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
-from torch import Tensor
-
 from seedvr.common.distributed import get_device
 from seedvr.common.distributed.advanced import (
-    get_next_sequence_parallel_rank,
-    get_prev_sequence_parallel_rank,
     get_sequence_parallel_group,
     get_sequence_parallel_rank,
     get_sequence_parallel_world_size,
@@ -30,6 +25,7 @@ from seedvr.common.distributed.ops import Gather
 from seedvr.common.logger import get_logger
 from seedvr.common.utils import safe_pad_operation
 from seedvr.models.video_vae_v3.modules.types import MemoryState
+from torch import Tensor
 
 logger = get_logger(__name__)
 
@@ -55,7 +51,8 @@ def causal_conv_slice_inputs(x, split_size, memory_state):
     split_sizes = torch.tensor(split_sizes)
     slices_per_rank = len(split_sizes) // sp_size
     split_sizes = split_sizes.split(
-        [slices_per_rank] * (sp_size - 1) + [len(split_sizes) - slices_per_rank * (sp_size - 1)]
+        [slices_per_rank] * (sp_size - 1)
+        + [len(split_sizes) - slices_per_rank * (sp_size - 1)]
     )
     split_sizes = list(map(lambda s: s.sum().item(), split_sizes))
     logger.debug(f"split_sizes: {split_sizes}")
@@ -71,7 +68,9 @@ def causal_conv_gather_outputs(x):
     # Communicate shapes.
     unpad_lens = torch.empty((sp_size,), device=get_device(), dtype=torch.long)
     local_unpad_len = torch.tensor([x.size(2)], device=get_device(), dtype=torch.long)
-    torch.distributed.all_gather_into_tensor(unpad_lens, local_unpad_len, group=sp_group)
+    torch.distributed.all_gather_into_tensor(
+        unpad_lens, local_unpad_len, group=sp_group
+    )
 
     # Padding to max_len for gather.
     max_len = unpad_lens.max()
@@ -89,16 +88,26 @@ def causal_conv_gather_outputs(x):
 
 
 def get_output_len(conv_module, input_len, pad_len, dim=0):
-    dilated_kernerl_size = conv_module.dilation[dim] * (conv_module.kernel_size[dim] - 1) + 1
-    output_len = (input_len + pad_len - dilated_kernerl_size) // conv_module.stride[dim] + 1
+    dilated_kernerl_size = (
+        conv_module.dilation[dim] * (conv_module.kernel_size[dim] - 1) + 1
+    )
+    output_len = (input_len + pad_len - dilated_kernerl_size) // conv_module.stride[
+        dim
+    ] + 1
     return output_len
 
 
 def get_cache_size(conv_module, input_len, pad_len, dim=0):
-    dilated_kernerl_size = conv_module.dilation[dim] * (conv_module.kernel_size[dim] - 1) + 1
-    output_len = (input_len + pad_len - dilated_kernerl_size) // conv_module.stride[dim] + 1
+    dilated_kernerl_size = (
+        conv_module.dilation[dim] * (conv_module.kernel_size[dim] - 1) + 1
+    )
+    output_len = (input_len + pad_len - dilated_kernerl_size) // conv_module.stride[
+        dim
+    ] + 1
     remain_len = (
-        input_len + pad_len - ((output_len - 1) * conv_module.stride[dim] + dilated_kernerl_size)
+        input_len
+        + pad_len
+        - ((output_len - 1) * conv_module.stride[dim] + dilated_kernerl_size)
     )
     overlap_len = dilated_kernerl_size - conv_module.stride[dim]
     cache_len = overlap_len + remain_len  # >= 0
@@ -114,12 +123,12 @@ def get_cache_size(conv_module, input_len, pad_len, dim=0):
     return cache_len
 
 
-def cache_send_recv(tensor: List[Tensor], cache_size, times, memory=None):
-    sp_group = None #get_sequence_parallel_group()
-    sp_rank = 0 # get_sequence_parallel_rank()
-    sp_size = 1 # get_sequence_parallel_world_size()
-    send_dst = None # get_next_sequence_parallel_rank()
-    recv_src = None # get_prev_sequence_parallel_rank()
+def cache_send_recv(tensor: list[Tensor], cache_size, times, memory=None):
+    sp_group = None  # get_sequence_parallel_group()
+    sp_rank = 0  # get_sequence_parallel_rank()
+    sp_size = 1  # get_sequence_parallel_world_size()
+    send_dst = None  # get_next_sequence_parallel_rank()
+    recv_src = None  # get_prev_sequence_parallel_rank()
     recv_buffer = None
     recv_req = None
 
@@ -144,7 +153,9 @@ def cache_send_recv(tensor: List[Tensor], cache_size, times, memory=None):
             recv_req = dist.irecv(recv_buffer, recv_src, group=sp_group)
         if sp_rank < sp_size - 1:
             if cache_size > tensor[-1].size(2) and len(tensor) == 1:
-                logger.debug(f"[sp{sp_rank}] force concat before send {tensor[-1].size()}")
+                logger.debug(
+                    f"[sp{sp_rank}] force concat before send {tensor[-1].size()}"
+                )
                 if recv_req is not None:
                     recv_req.wait()
                 tensor[0] = torch.cat([recv_buffer, tensor[0]], dim=2)
@@ -153,7 +164,9 @@ def cache_send_recv(tensor: List[Tensor], cache_size, times, memory=None):
                 2
             ), f"Not enough value to cache, got {tensor[-1].size()}, cache_size={cache_size}"
             dist.isend(
-                tensor[-1][:, :, -cache_size:].detach().contiguous(), send_dst, group=sp_group
+                tensor[-1][:, :, -cache_size:].detach().contiguous(),
+                send_dst,
+                group=sp_group,
             )
         if recv_req is not None:
             recv_req.wait()

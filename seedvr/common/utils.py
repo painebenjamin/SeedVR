@@ -1,10 +1,7 @@
 import inspect
 import time
-import torch
-import torch.nn.functional as F
-from collections.abc import Iterator, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from typing import Callable, Dict, Any
 from functools import lru_cache
 from typing import Any
 from urllib.request import urlopen
@@ -12,10 +9,11 @@ from urllib.request import urlopen
 import torch
 import torch.nn.functional as F
 
+
 def filter_kwargs_for_method(
     method: Callable,
-    kwargs: Dict[str, Any],
-) -> Dict[str, Any]:
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
     """
     Filter kwargs for a method to only include valid parameters.
     """
@@ -23,21 +21,24 @@ def filter_kwargs_for_method(
         sig = inspect.signature(method)
     except Exception as e:
         return kwargs
-    valid_params = set(sig.parameters.keys()) - {'self', 'cls'}
+    valid_params = set(sig.parameters.keys()) - {"self", "cls"}
     return {k: v for k, v in kwargs.items() if k in valid_params}
 
-def safe_pad_operation(x, padding, mode='constant', value=0.0):
+
+def safe_pad_operation(x, padding, mode="constant", value=0.0):
     """Safe padding operation that handles Half precision only for problematic modes"""
     # Modes qui nécessitent le fix Half precision
-    problematic_modes = ['replicate', 'reflect', 'circular']
-    
+    problematic_modes = ["replicate", "reflect", "circular"]
+
     if mode in problematic_modes:
         try:
             return F.pad(x, padding, mode=mode, value=value)
         except RuntimeError as e:
             if "not implemented for 'Half'" in str(e):
                 original_dtype = x.dtype
-                return F.pad(x.float(), padding, mode=mode, value=value).to(original_dtype)
+                return F.pad(x.float(), padding, mode=mode, value=value).to(
+                    original_dtype
+                )
             else:
                 raise e
     else:
@@ -45,44 +46,52 @@ def safe_pad_operation(x, padding, mode='constant', value=0.0):
         return F.pad(x, padding, mode=mode, value=value)
 
 
-def safe_interpolate_operation(x, size=None, scale_factor=None, mode='nearest', align_corners=None, recompute_scale_factor=None):
+def safe_interpolate_operation(
+    x,
+    size=None,
+    scale_factor=None,
+    mode="nearest",
+    align_corners=None,
+    recompute_scale_factor=None,
+):
     """Safe interpolate operation that handles Half precision for problematic modes"""
     # Modes qui peuvent causer des problèmes avec Half precision
-    problematic_modes = ['bilinear', 'bicubic', 'trilinear']
-    
+    problematic_modes = ["bilinear", "bicubic", "trilinear"]
+
     if mode in problematic_modes:
         try:
             return F.interpolate(
-                x, 
-                size=size, 
-                scale_factor=scale_factor, 
-                mode=mode, 
+                x,
+                size=size,
+                scale_factor=scale_factor,
+                mode=mode,
                 align_corners=align_corners,
-                recompute_scale_factor=recompute_scale_factor
+                recompute_scale_factor=recompute_scale_factor,
             )
         except RuntimeError as e:
-            if ("not implemented for 'Half'" in str(e) or 
-                "compute_indices_weights" in str(e)):
+            if "not implemented for 'Half'" in str(
+                e
+            ) or "compute_indices_weights" in str(e):
                 original_dtype = x.dtype
                 return F.interpolate(
-                    x.float(), 
-                    size=size, 
-                    scale_factor=scale_factor, 
-                    mode=mode, 
+                    x.float(),
+                    size=size,
+                    scale_factor=scale_factor,
+                    mode=mode,
                     align_corners=align_corners,
-                    recompute_scale_factor=recompute_scale_factor
+                    recompute_scale_factor=recompute_scale_factor,
                 ).to(original_dtype)
             else:
                 raise e
     else:
         # Pour 'nearest' et autres modes compatibles, pas de fix nécessaire
         return F.interpolate(
-            x, 
-            size=size, 
-            scale_factor=scale_factor, 
-            mode=mode, 
+            x,
+            size=size,
+            scale_factor=scale_factor,
+            mode=mode,
             align_corners=align_corners,
-            recompute_scale_factor=recompute_scale_factor
+            recompute_scale_factor=recompute_scale_factor,
         )
 
 
@@ -217,7 +226,7 @@ def read_from_url(url: str, timeout: int = 10, retries: int = 3) -> bytes:
         except Exception as e:
             if attempt == retries - 1:
                 raise e
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
 
 
 @lru_cache
@@ -262,15 +271,18 @@ def sliding_2d_windows(
 
     return coords
 
+
 def tqdm_available() -> bool:
     """
     Check if tqdm is available.
     """
     try:
         import tqdm
+
         return True
     except ImportError:
         return False
+
 
 def maybe_use_tqdm(
     iterable: Iterable[Any],

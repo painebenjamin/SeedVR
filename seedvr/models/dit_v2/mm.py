@@ -12,8 +12,10 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any
+
 import torch
 from torch import nn
 
@@ -24,12 +26,14 @@ class MMArg:
     txt: Any
 
 
-def get_args(key: str, args: List[Any]) -> List[Any]:
+def get_args(key: str, args: list[Any]) -> list[Any]:
     return [getattr(v, key) if isinstance(v, MMArg) else v for v in args]
 
 
-def get_kwargs(key: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: getattr(v, key) if isinstance(v, MMArg) else v for k, v in kwargs.items()}
+def get_kwargs(key: str, kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        k: getattr(v, key) if isinstance(v, MMArg) else v for k, v in kwargs.items()
+    }
 
 
 class MMModule(nn.Module):
@@ -62,7 +66,7 @@ class MMModule(nn.Module):
         txt: torch.FloatTensor,
         *args,
         **kwargs,
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
     ]:

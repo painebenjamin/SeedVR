@@ -12,33 +12,17 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
+import argparse
+import datetime
+import gc
 import os
-import torch
+
 import mediapy
+import torch
 from einops import rearrange
 from omegaconf import OmegaConf
-
-import datetime
-from tqdm import tqdm
-import gc
-
-
-from seedvr.data.image.transforms.divisible_crop import DivisibleCrop
-from seedvr.data.image.transforms.na_resize import NaResize
-from seedvr.data.video.transforms.rearrange import Rearrange
-
-from projects.video_diffusion_sr.color_fix import wavelet_reconstruction
-from torchvision.transforms import Compose, Lambda, Normalize
-from torchvision.io.video import read_video
-from torchvision.io import read_image
-import argparse
-
-
-from seedvr.common.distributed import (
-    get_device,
-    init_torch,
-)
-
+from seedvr.common.config import load_config
+from seedvr.common.distributed import get_device, init_torch
 from seedvr.common.distributed.advanced import (
     get_data_parallel_rank,
     get_data_parallel_world_size,
@@ -46,36 +30,46 @@ from seedvr.common.distributed.advanced import (
     get_sequence_parallel_world_size,
     init_sequence_parallel,
 )
-
-from seedvr.projects.video_diffusion_sr.infer import VideoDiffusionInfer
-from seedvr.common.config import load_config
 from seedvr.common.distributed.ops import sync_data
-from seedvr.common.seed import set_seed
 from seedvr.common.partition import partition_by_groups, partition_by_size
+from seedvr.common.seed import set_seed
+from seedvr.data.image.transforms.divisible_crop import DivisibleCrop
+from seedvr.data.image.transforms.na_resize import NaResize
+from seedvr.data.video.transforms.rearrange import Rearrange
+from seedvr.projects.video_diffusion_sr.infer import VideoDiffusionInfer
+from torchvision.io import read_image
+from torchvision.io.video import read_video
+from torchvision.transforms import Compose, Lambda, Normalize
+from tqdm import tqdm
+
+from projects.video_diffusion_sr.color_fix import wavelet_reconstruction
 
 
 def configure_sequence_parallel(sp_size):
     if sp_size > 1:
         init_sequence_parallel(sp_size)
 
+
 def is_image_file(filename):
-    image_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
+    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
     return os.path.splitext(filename.lower())[1] in image_exts
 
+
 def configure_runner(sp_size):
-    config_path = os.path.join('./configs_3b', 'main.yaml')
+    config_path = os.path.join("./configs_3b", "main.yaml")
     config = load_config(config_path)
     runner = VideoDiffusionInfer(config)
     OmegaConf.set_readonly(runner.config, False)
-    
+
     init_torch(cudnn_benchmark=False, timeout=datetime.timedelta(seconds=3600))
     configure_sequence_parallel(sp_size)
-    runner.configure_dit_model(device="cuda", checkpoint='./ckpts/seedvr2_ema_3b.pth')
+    runner.configure_dit_model(device="cuda", checkpoint="./ckpts/seedvr2_ema_3b.pth")
     runner.configure_vae_model()
     # Set memory limit.
     if hasattr(runner.vae, "set_memory_limit"):
         runner.vae.set_memory_limit(**runner.config.vae.memory_limit)
     return runner
+
 
 def generation_step(runner, text_embeds_dict, cond_latents):
     def _move_to_cuda(x):
@@ -91,16 +85,10 @@ def generation_step(runner, text_embeds_dict, cond_latents):
     cond_noise_scale = 0.0
 
     def _add_noise(x, aug_noise):
-        t = (
-            torch.tensor([1000.0], device=get_device())
-            * cond_noise_scale
-        )
+        t = torch.tensor([1000.0], device=get_device()) * cond_noise_scale
         shape = torch.tensor(x.shape[1:], device=get_device())[None]
         t = runner.timestep_transform(t, shape)
-        print(
-            f"Timestep shifting from"
-            f" {1000.0 * cond_noise_scale} to {t}."
-        )
+        print(f"Timestep shifting from" f" {1000.0 * cond_noise_scale} to {t}.")
         x = runner.schedule.forward(x, aug_noise, t)
         return x
 
@@ -133,7 +121,21 @@ def generation_step(runner, text_embeds_dict, cond_latents):
 
     return samples
 
-def generation_loop(runner, video_path='./test_videos', output_dir='./results', batch_size=1, cfg_scale=1.0, cfg_rescale=0.0, sample_steps=1, seed=666, res_h=1280, res_w=720, sp_size=1, out_fps=None):
+
+def generation_loop(
+    runner,
+    video_path="./test_videos",
+    output_dir="./results",
+    batch_size=1,
+    cfg_scale=1.0,
+    cfg_rescale=0.0,
+    sample_steps=1,
+    seed=666,
+    res_h=1280,
+    res_w=720,
+    sp_size=1,
+    out_fps=None,
+):
 
     def _build_pos_and_neg_prompt():
         # read positive prompt
@@ -162,8 +164,8 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
         # Text encoder forward.
         positive_prompts_embeds = []
         for texts_pos in tqdm(original_videos_local):
-            text_pos_embeds = torch.load('pos_emb.pt')
-            text_neg_embeds = torch.load('neg_emb.pt')
+            text_pos_embeds = torch.load("pos_emb.pt")
+            text_neg_embeds = torch.load("neg_emb.pt")
 
             positive_prompts_embeds.append(
                 {"texts_pos": [text_pos_embeds], "texts_neg": [text_neg_embeds]}
@@ -225,10 +227,7 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
     video_transform = Compose(
         [
             NaResize(
-                resolution=(
-                    res_h * res_w
-                )
-                ** 0.5,
+                resolution=(res_h * res_w) ** 0.5,
                 mode="area",
                 # Upsample image, model only trained for high res.
                 downsample_only=False,
@@ -241,21 +240,21 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
     )
 
     # generation loop
-    for videos, text_embeds in tqdm(zip(original_videos_local, positive_prompts_embeds)):
+    for videos, text_embeds in tqdm(
+        zip(original_videos_local, positive_prompts_embeds)
+    ):
         # read condition latents
         cond_latents = []
         fps_lists = []
         for video in videos:
             if is_image_file(video):
-                video = read_image(
-                    os.path.join(video_path, video)
-                ).unsqueeze(0) / 255.0
+                video = read_image(os.path.join(video_path, video)).unsqueeze(0) / 255.0
                 if sp_size > 1:
                     raise ValueError("Sp size should be set to 1 for image inputs!")
             else:
                 video, _, info = read_video(
                     os.path.join(video_path, video), output_format="TCHW"
-                    )
+                )
                 video = video / 255.0
                 fps_lists.append(info["video_fps"] if out_fps is None else out_fps)
             print(f"Read video size: {video.size()}")
@@ -312,14 +311,13 @@ def generation_loop(runner, video_path='./test_videos', output_dir='./results', 
                 if sample.shape[0] == 1:
                     mediapy.write_image(filename, sample.squeeze(0))
                 else:
-                    mediapy.write_video(
-                        filename, sample, fps=save_fps
-                    )
+                    mediapy.write_video(filename, sample, fps=save_fps)
         gc.collect()
         torch.cuda.empty_cache()
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser() 
+    parser = argparse.ArgumentParser()
     parser.add_argument("--video_path", type=str, default="./test_videos")
     parser.add_argument("--output_dir", type=str, default="./results")
     parser.add_argument("--seed", type=int, default=666)

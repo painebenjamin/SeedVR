@@ -16,7 +16,6 @@
 Linear interpolation schedule (lerp).
 """
 
-from typing import Union
 import torch
 
 from .base import Schedule
@@ -34,11 +33,11 @@ class LinearInterpolationSchedule(Schedule):
     Can be either continuous or discrete.
     """
 
-    def __init__(self, T: Union[int, float] = 1.0):
+    def __init__(self, T: int | float = 1.0):
         self._T = T
 
     @property
-    def T(self) -> Union[int, float]:
+    def T(self) -> int | float:
         return self._T
 
     def A(self, t: torch.Tensor) -> torch.Tensor:

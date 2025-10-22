@@ -12,15 +12,18 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Tuple, Union
+
 import torch
 from einops import rearrange
-from torch.nn import functional as F
 
 # from ..cache import Cache
 from seedvr.common.cache import Cache
-from seedvr.common.distributed.ops import gather_heads_scatter_seq, gather_seq_scatter_heads_qkv
-from seedvr.common.utils import safe_pad_operation, get_torch_dtype
+from seedvr.common.distributed.ops import (
+    gather_heads_scatter_seq,
+    gather_seq_scatter_heads_qkv,
+)
+from seedvr.common.utils import get_torch_dtype, safe_pad_operation
+
 from .. import na
 from ..attention import FlashAttentionVarlen
 from ..blocks.mmdit_window_block import MMWindowAttention, MMWindowTransformerBlock
@@ -29,6 +32,7 @@ from ..modulation import ada_layer_type
 from ..normalization import norm_layer_type
 from ..rope import NaRotaryEmbedding3d
 from ..window import get_window_op
+
 
 class NaSwinAttention(MMWindowAttention):
     def __init__(
@@ -41,10 +45,10 @@ class NaSwinAttention(MMWindowAttention):
         qk_rope: bool,
         qk_norm: norm_layer_type,
         qk_norm_eps: float,
-        window: Union[int, Tuple[int, int, int]],
+        window: int | tuple[int, int, int],
         window_method: str,
         shared_qkv: bool,
-        dtype: Union[str, torch.dtype] = "float32",
+        dtype: str | torch.dtype = "float32",
         **kwargs,
     ):
         super().__init__(
@@ -72,7 +76,7 @@ class NaSwinAttention(MMWindowAttention):
         vid_shape: torch.LongTensor,  # b 3
         txt_shape: torch.LongTensor,  # b 1
         cache: Cache,
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
     ]:
@@ -105,7 +109,9 @@ class NaSwinAttention(MMWindowAttention):
         )
         vid_qkv_win = window_partition(vid_qkv)
 
-        vid_qkv_win = rearrange(vid_qkv_win, "l (o h d) -> l o h d", o=3, d=self.head_dim)
+        vid_qkv_win = rearrange(
+            vid_qkv_win, "l (o h d) -> l o h d", o=3, d=self.head_dim
+        )
         txt_qkv = rearrange(txt_qkv, "l (o h d) -> l o h d", o=3, d=self.head_dim)
 
         vid_q, vid_k, vid_v = vid_qkv_win.unbind(1)
@@ -117,7 +123,9 @@ class NaSwinAttention(MMWindowAttention):
         txt_len = cache("txt_len", lambda: txt_shape.prod(-1))
 
         vid_len_win = cache_win("vid_len", lambda: window_shape.prod(-1))
-        txt_len_win = cache_win("txt_len", lambda: txt_len.repeat_interleave(window_count))
+        txt_len_win = cache_win(
+            "txt_len", lambda: txt_len.repeat_interleave(window_count)
+        )
         all_len_win = cache_win("all_len", lambda: vid_len_win + txt_len_win)
         concat_win, unconcat_win = cache_win(
             "mm_pnp", lambda: na.repeat_concat_idx(vid_len_win, txt_len, window_count)
@@ -132,13 +140,19 @@ class NaSwinAttention(MMWindowAttention):
             k=concat_win(vid_k, txt_k).bfloat16(),
             v=concat_win(vid_v, txt_v).bfloat16(),
             cu_seqlens_q=cache_win(
-                "vid_seqlens_q", lambda: safe_pad_operation(all_len_win.cumsum(0), (1, 0)).int()
+                "vid_seqlens_q",
+                lambda: safe_pad_operation(all_len_win.cumsum(0), (1, 0)).int(),
             ),
             cu_seqlens_k=cache_win(
-                "vid_seqlens_k", lambda: safe_pad_operation(all_len_win.cumsum(0), (1, 0)).int()
+                "vid_seqlens_k",
+                lambda: safe_pad_operation(all_len_win.cumsum(0), (1, 0)).int(),
             ),
-            max_seqlen_q=cache_win("vid_max_seqlen_q", lambda: all_len_win.max().item()),
-            max_seqlen_k=cache_win("vid_max_seqlen_k", lambda: all_len_win.max().item()),
+            max_seqlen_q=cache_win(
+                "vid_max_seqlen_q", lambda: all_len_win.max().item()
+            ),
+            max_seqlen_k=cache_win(
+                "vid_max_seqlen_k", lambda: all_len_win.max().item()
+            ),
         ).type_as(vid_q)
 
         # text pooling
@@ -217,7 +231,7 @@ class NaMMSRTransformerBlock(MMWindowTransformerBlock):
         txt_shape: torch.LongTensor,  # b 1
         emb: torch.FloatTensor,
         cache: Cache,
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
         torch.LongTensor,
@@ -235,15 +249,23 @@ class NaMMSRTransformerBlock(MMWindowTransformerBlock):
         }
 
         vid_attn, txt_attn = self.attn_norm(vid, txt)
-        vid_attn, txt_attn = self.ada(vid_attn, txt_attn, layer="attn", mode="in", **ada_kwargs)
+        vid_attn, txt_attn = self.ada(
+            vid_attn, txt_attn, layer="attn", mode="in", **ada_kwargs
+        )
         vid_attn, txt_attn = self.attn(vid_attn, txt_attn, vid_shape, txt_shape, cache)
-        vid_attn, txt_attn = self.ada(vid_attn, txt_attn, layer="attn", mode="out", **ada_kwargs)
+        vid_attn, txt_attn = self.ada(
+            vid_attn, txt_attn, layer="attn", mode="out", **ada_kwargs
+        )
         vid_attn, txt_attn = (vid_attn + vid), (txt_attn + txt)
 
         vid_mlp, txt_mlp = self.mlp_norm(vid_attn, txt_attn)
-        vid_mlp, txt_mlp = self.ada(vid_mlp, txt_mlp, layer="mlp", mode="in", **ada_kwargs)
+        vid_mlp, txt_mlp = self.ada(
+            vid_mlp, txt_mlp, layer="mlp", mode="in", **ada_kwargs
+        )
         vid_mlp, txt_mlp = self.mlp(vid_mlp, txt_mlp)
-        vid_mlp, txt_mlp = self.ada(vid_mlp, txt_mlp, layer="mlp", mode="out", **ada_kwargs)
+        vid_mlp, txt_mlp = self.ada(
+            vid_mlp, txt_mlp, layer="mlp", mode="out", **ada_kwargs
+        )
         vid_mlp, txt_mlp = (vid_mlp + vid_attn), (txt_mlp + txt_attn)
 
         return vid_mlp, txt_mlp, vid_shape, txt_shape

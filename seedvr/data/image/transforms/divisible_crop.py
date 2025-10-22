@@ -12,7 +12,7 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Union
+
 import torch
 from PIL import Image
 from torchvision.transforms import functional as TVF
@@ -25,7 +25,7 @@ class DivisibleCrop:
 
         self.height_factor, self.width_factor = factor[0], factor[1]
 
-    def __call__(self, image: Union[torch.Tensor, Image.Image]):
+    def __call__(self, image: torch.Tensor | Image.Image):
         if isinstance(image, torch.Tensor):
             height, width = image.shape[-2:]
         elif isinstance(image, Image.Image):

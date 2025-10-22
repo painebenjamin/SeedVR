@@ -16,9 +16,10 @@
 Utility functions for creating schedules and samplers from config.
 """
 
+from typing import Any
+
 import torch
 from omegaconf import DictConfig
-from typing import Any
 
 from .samplers.base import Sampler
 from .samplers.euler import EulerSampler
@@ -42,18 +43,12 @@ def create_schedule_from_config(
     raise NotImplementedError
 
 
-def create_sampler_from_config(
-    config: DictConfig,
-    **kwargs: Any
-) -> Sampler:
+def create_sampler_from_config(config: DictConfig, **kwargs: Any) -> Sampler:
     """
     Create a sampler from configuration.
     """
     if config.type == "euler":
-        return EulerSampler(
-            prediction_type=config.prediction_type,
-            **kwargs
-        )
+        return EulerSampler(prediction_type=config.prediction_type, **kwargs)
     raise NotImplementedError
 
 

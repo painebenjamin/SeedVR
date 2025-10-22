@@ -13,13 +13,12 @@
 # // limitations under the License.
 
 from functools import lru_cache
-from typing import Tuple
+
 import torch
 from einops import rearrange
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
-from torch import nn
-
 from seedvr.common.cache import Cache
+from torch import nn
 
 
 class RotaryEmbeddingBase(nn.Module):
@@ -54,8 +53,8 @@ class RotaryEmbedding3d(RotaryEmbeddingBase):
         self,
         q: torch.FloatTensor,  # b h l d
         k: torch.FloatTensor,  # b h l d
-        size: Tuple[int, int, int],
-    ) -> Tuple[
+        size: tuple[int, int, int],
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
     ]:
@@ -77,7 +76,7 @@ class NaRotaryEmbedding3d(RotaryEmbedding3d):
         k: torch.FloatTensor,  # L h d
         shape: torch.LongTensor,
         cache: Cache,
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.FloatTensor,
     ]:

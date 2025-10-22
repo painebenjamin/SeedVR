@@ -1,5 +1,6 @@
-from abc import ABC, abstractmethod
-from typing import Any, Sequence, Union
+from abc import ABC
+from typing import Any
+
 import torch
 
 from ..types import SamplingDirection
@@ -10,12 +11,12 @@ class Timesteps(ABC):
     Timesteps base class.
     """
 
-    def __init__(self, T: Union[int, float]):
+    def __init__(self, T: int | float):
         assert T > 0
         self._T = T
 
     @property
-    def T(self) -> Union[int, float]:
+    def T(self) -> int | float:
         """
         Maximum timestep inclusive.
         int if discrete, float if continuous.
@@ -43,7 +44,7 @@ class SamplingTimesteps(Timesteps):
 
     def __init__(
         self,
-        T: Union[int, float],
+        T: int | float,
         timesteps: torch.Tensor,
         direction: SamplingDirection,
     ):
@@ -58,7 +59,7 @@ class SamplingTimesteps(Timesteps):
         """
         return len(self.timesteps)
 
-    def __getitem__(self, idx: Union[int, torch.IntTensor]) -> torch.Tensor:
+    def __getitem__(self, idx: int | torch.IntTensor) -> torch.Tensor:
         """
         The timestep at the sampling step.
         Returns a scalar tensor if idx is int,
@@ -77,7 +78,13 @@ class SamplingTimesteps(Timesteps):
         idx.view(-1)[i] = j.int()
         return idx
 
-    def set_timesteps(self, T: int, timesteps: torch.Tensor, direction: SamplingDirection | None = None, **kwargs: Any) -> None:
+    def set_timesteps(
+        self,
+        T: int,
+        timesteps: torch.Tensor,
+        direction: SamplingDirection | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Set the timesteps.
         """

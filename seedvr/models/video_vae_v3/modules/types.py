@@ -13,7 +13,8 @@
 # // limitations under the License.
 
 from enum import Enum
-from typing import Dict, Literal, NamedTuple, Optional
+from typing import Literal, NamedTuple, Optional
+
 import torch
 
 _receptive_field_t = Literal["half", "full"]
@@ -21,6 +22,7 @@ _inflation_mode_t = Literal["none", "tail", "replicate"]
 _memory_device_t = Optional[Literal["cpu", "same"]]
 _gradient_checkpointing_t = Optional[Literal["half", "full"]]
 _selective_checkpointing_t = Optional[Literal["coarse", "fine"]]
+
 
 class DiagonalGaussianDistribution:
     def __init__(self, mean: torch.Tensor, logvar: torch.Tensor):
@@ -41,6 +43,7 @@ class DiagonalGaussianDistribution:
             dim=list(range(1, self.mean.ndim)),
         )
 
+
 class MemoryState(Enum):
     """
     State[Disabled]:        No memory bank will be enabled.
@@ -58,18 +61,18 @@ class MemoryState(Enum):
 class QuantizerOutput(NamedTuple):
     latent: torch.Tensor
     extra_loss: torch.Tensor
-    statistics: Dict[str, torch.Tensor]
+    statistics: dict[str, torch.Tensor]
 
 
 class CausalAutoencoderOutput(NamedTuple):
     sample: torch.Tensor
     latent: torch.Tensor
-    posterior: Optional[DiagonalGaussianDistribution]
+    posterior: DiagonalGaussianDistribution | None
 
 
 class CausalEncoderOutput(NamedTuple):
     latent: torch.Tensor
-    posterior: Optional[DiagonalGaussianDistribution]
+    posterior: DiagonalGaussianDistribution | None
 
 
 class CausalDecoderOutput(NamedTuple):

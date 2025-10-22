@@ -10,7 +10,7 @@ import datetime
 from cv2 import VideoCapture
 import mediapy
 
-image = Image.open("test_image.jpg")
+image = Image.open("test_2.png")
 image = torch.from_numpy(np.array(image)) # hwc
 image = rearrange(image, "h w c -> c 1 h w")  #cfhw
 image = image.to(torch.float32) / 255.0  # [0, 1]
@@ -32,12 +32,11 @@ if get_world_size() > 1:
 #pipeline = SeedVRPipeline.from_original_pretrained(device="cuda")
 #pipeline.dit.to(torch.bfloat16)
 #pipeline.save_pretrained_flashpack("SeedVR2-7B-FlashPack")
-pipeline = SeedVRPipeline.from_pretrained_flashpack("fal/SeedVR2-7B-FlashPack", device=get_device(), use_distributed_loading=True)
-"""
+pipeline = SeedVRPipeline.from_pretrained_flashpack("fal/SeedVR2-7B-FlashPack", device=get_device(), use_distributed_loading=get_world_size() > 1)
 samples = pipeline(
     image,
-    height=3840,
-    width=2160,
+    height=2768,
+    width=2144,
 )
 samples = [
     sample[0].permute(1, 2, 0)
@@ -50,10 +49,6 @@ samples = [
 for i, sample in enumerate(samples):
     sample.save(f"sample_{i}.png")
 
-
-"""
-
-
 # Now test video
 video_array = []
 video_capture = VideoCapture("test_video.mp4")
@@ -63,8 +58,6 @@ while True:
     if not ret:
         break
     i += 1
-    if i % 2 == 0:
-        continue
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     video_array.append(frame)
 video_capture.release()
@@ -75,8 +68,6 @@ video_array = video_array.permute(0, 3, 1, 2)
 video_array = video_array.to(torch.float32) / 255.0
 video_array = video_array * 2.0 - 1.0
 video_array = rearrange(video_array, "t c h w -> c t h w")
-
-video_array = video_array[:, :121]  # test with 120 frames for now
 
 c, t, h, w = video_array.shape
 

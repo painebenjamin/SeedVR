@@ -13,14 +13,13 @@
 # // limitations under the License.
 
 from enum import Enum
-from typing import Optional
+
 import numpy as np
 import torch
 from diffusers.models.normalization import RMSNorm
 from einops import rearrange
-from torch import Tensor, nn
-
 from seedvr.common.logger import get_logger
+from torch import Tensor, nn
 
 logger = get_logger(__name__)
 
@@ -72,7 +71,7 @@ def remove_head(tensor: Tensor, times: int = 1) -> Tensor:
 
 
 def extend_head(
-    tensor: Tensor, times: Optional[int] = 2, memory: Optional[Tensor] = None
+    tensor: Tensor, times: int | None = 2, memory: Tensor | None = None
 ) -> Tensor:
     """
     When memory is None:
@@ -87,10 +86,14 @@ def extend_head(
     else:
         tile_repeat = np.ones(tensor.ndim).astype(int)
         tile_repeat[2] = times
-        return torch.cat(tensors=(torch.tile(tensor[:, :, :1], list(tile_repeat)), tensor), dim=2)
+        return torch.cat(
+            tensors=(torch.tile(tensor[:, :, :1], list(tile_repeat)), tensor), dim=2
+        )
 
 
-def inflate_weight(weight_2d: torch.Tensor, weight_3d: torch.Tensor, inflation_mode: str):
+def inflate_weight(
+    weight_2d: torch.Tensor, weight_3d: torch.Tensor, inflation_mode: str
+):
     """
     Inflate a 2D convolution weight matrix to a 3D one.
     Parameters:

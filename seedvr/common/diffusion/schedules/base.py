@@ -17,7 +17,7 @@ Schedule base class.
 """
 
 from abc import ABC, abstractmethod, abstractproperty
-from typing import Tuple, Union
+
 import torch
 
 from ..types import PredictionType
@@ -34,7 +34,7 @@ class Schedule(ABC):
     """
 
     @abstractproperty
-    def T(self) -> Union[int, float]:
+    def T(self) -> int | float:
         """
         Maximum timestep inclusive.
         Schedule is continuous if float, discrete if int.
@@ -79,7 +79,9 @@ class Schedule(ABC):
         """
         return isinstance(self.T, float)
 
-    def forward(self, x_0: torch.Tensor, x_T: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x_0: torch.Tensor, x_T: torch.Tensor, t: torch.Tensor
+    ) -> torch.Tensor:
         """
         Diffusion forward function.
         """
@@ -87,8 +89,12 @@ class Schedule(ABC):
         return self.A(t) * x_0 + self.B(t) * x_T
 
     def convert_from_pred(
-        self, pred: torch.Tensor, pred_type: PredictionType, x_t: torch.Tensor, t: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        self,
+        pred: torch.Tensor,
+        pred_type: PredictionType,
+        x_t: torch.Tensor,
+        t: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Convert from prediction. Return predicted x_0 and x_T.
         """
@@ -114,7 +120,11 @@ class Schedule(ABC):
         return pred_x_0, pred_x_T
 
     def convert_to_pred(
-        self, x_0: torch.Tensor, x_T: torch.Tensor, t: torch.Tensor, pred_type: PredictionType
+        self,
+        x_0: torch.Tensor,
+        x_T: torch.Tensor,
+        t: torch.Tensor,
+        pred_type: PredictionType,
     ) -> torch.FloatTensor:
         """
         Convert to prediction target given x_0 and x_T.

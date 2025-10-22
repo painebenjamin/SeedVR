@@ -17,15 +17,19 @@ Configuration utility functions
 """
 
 import importlib
-from typing import Any, Callable, List, Union
-from omegaconf import DictConfig, ListConfig, OmegaConf
-from functools import partial
 import os
+from collections.abc import Callable
+from functools import partial
+from typing import Any
+
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 OmegaConf.register_new_resolver("eval", eval)
 
 
-def load_config(path: str, argv: List[str] = None, root_dir: str | None = None) -> Union[DictConfig, ListConfig]:
+def load_config(
+    path: str, argv: list[str] = None, root_dir: str | None = None
+) -> DictConfig | ListConfig:
     """
     Load a configuration. Will resolve inheritance.
     """
@@ -40,7 +44,7 @@ def load_config(path: str, argv: List[str] = None, root_dir: str | None = None) 
 
 def resolve_recursive(
     config: Any,
-    resolver: Callable[[Union[DictConfig, ListConfig]], Union[DictConfig, ListConfig]],
+    resolver: Callable[[DictConfig | ListConfig], DictConfig | ListConfig],
 ) -> Any:
     config = resolver(config)
     if isinstance(config, DictConfig):
@@ -56,7 +60,9 @@ def resolve_recursive(
     return config
 
 
-def resolve_inheritance(config: Union[DictConfig, ListConfig], root_dir: str | None = None) -> Any:
+def resolve_inheritance(
+    config: DictConfig | ListConfig, root_dir: str | None = None
+) -> Any:
     """
     Recursively resolve inheritance if the config contains:
     __inherit__: path/to/parent.yaml or a ListConfig of such paths.

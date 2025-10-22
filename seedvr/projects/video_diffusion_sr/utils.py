@@ -20,12 +20,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
+
 import pyarrow as pa
 import pyarrow.parquet as pq
 from omegaconf import DictConfig
 
-# NOTE DOES THESE EXIST???
+# NOTE DOES THESE EXIST???
 from seedvr.common.distributed import get_global_rank, get_world_size
 from seedvr.common.fs import copy, exists, listdir, mkdir, remove
 from seedvr.common.partition import partition_by_groups
@@ -46,7 +47,7 @@ def save_and_copy(
     row_group_size: int,
     executor: ThreadPoolExecutor,
     do_async: bool = False,
-    futures: List[Tuple[threading.Thread, str]] = [],
+    futures: list[tuple[threading.Thread, str]] = [],
 ):
     # Function to handle completion of the future
     def _make_on_complete(local_path):
@@ -86,9 +87,9 @@ def save_and_copy(
 
 @dataclass
 class FileListOutput:
-    existing_files: List[str]
-    source_files: List[Any]
-    target_files: List[str]
+    existing_files: list[str]
+    source_files: list[Any]
+    target_files: list[str]
 
 
 @dataclass
@@ -100,10 +101,10 @@ class PersistedParquet:
         self,
         row_group_size: int,
         executor: ThreadPoolExecutor,
-        pa_table: Optional[pa.Table] = None,
-        data_dict: Optional[Dict[str, List[Union[str, bytes]]]] = None,
+        pa_table: pa.Table | None = None,
+        data_dict: dict[str, list[str | bytes]] | None = None,
         is_last_file=False,
-        futures: List[threading.Thread] = [],
+        futures: list[threading.Thread] = [],
     ):
         assert (pa_table is None) != (data_dict is None)
         local_path = get_local_path(self.path)
@@ -123,7 +124,7 @@ class PersistedParquet:
     # Method to generate schema from a dictionary
     def generate_schema_from_dict(
         self,
-        data_dict: Dict[str, List[Union[str, bytes]]],
+        data_dict: dict[str, list[str | bytes]],
     ):
         schema_dict = {}
         for key, value in data_dict.items():
@@ -132,7 +133,9 @@ class PersistedParquet:
             elif isinstance(value[0], bytes):
                 schema_dict[key] = pa.binary()
             else:
-                raise ValueError(f"Unsupported data type for key '{key}': {type(value)}")
+                raise ValueError(
+                    f"Unsupported data type for key '{key}': {type(value)}"
+                )
         return pa.schema(schema_dict)
 
 
@@ -144,7 +147,7 @@ class ParquetManager(ABC):
 
     def __init__(
         self,
-        task: Optional[DictConfig] = None,
+        task: DictConfig | None = None,
         target_dir: str = ".",
     ):
         self.task = task
@@ -189,8 +192,8 @@ class ParquetManager(ABC):
         *,
         file_name: str,
         row_group_size: int,
-        pa_table: Optional[pa.Table] = None,
-        data_dict: Optional[Dict[str, List[Union[str, bytes]]]] = None,
+        pa_table: pa.Table | None = None,
+        data_dict: dict[str, list[str | bytes]] | None = None,
         override: bool = True,
         is_last_file: bool = False,
     ):
@@ -234,7 +237,9 @@ class DumpingManager(ParquetManager):
         return result_folder, result_file
 
     # Method to configure task paths
-    def configure_task_path(self, source_path: str, rsplit: int, path_mode: str = "dir"):
+    def configure_task_path(
+        self, source_path: str, rsplit: int, path_mode: str = "dir"
+    ):
 
         file_paths = self.get_parquet_files(
             source_path=source_path,
@@ -245,7 +250,9 @@ class DumpingManager(ParquetManager):
         random.Random(0).shuffle(file_paths)
 
         # Partition the file paths based on task configuration
-        full_source_files = partition_by_groups(file_paths, self.task.total_count)[self.task.index]
+        full_source_files = partition_by_groups(file_paths, self.task.total_count)[
+            self.task.index
+        ]
         full_source_files = partition_by_groups(full_source_files, get_world_size())[
             get_global_rank()
         ]
@@ -259,7 +266,8 @@ class DumpingManager(ParquetManager):
         full_target_folders = set(full_target_folders)
 
         existing_file_paths = map(
-            lambda folder: listdir(folder) if exists(folder) else [], full_target_folders
+            lambda folder: listdir(folder) if exists(folder) else [],
+            full_target_folders,
         )
         existing_file_paths = chain(*existing_file_paths)
         self.existing_files = list(
@@ -276,7 +284,9 @@ class DumpingManager(ParquetManager):
             )
         )
         if filtered_pairs:
-            filtered_source_files, filtered_target_files = map(list, zip(*filtered_pairs))
+            filtered_source_files, filtered_target_files = map(
+                list, zip(*filtered_pairs)
+            )
         else:
             filtered_source_files, filtered_target_files = [], []
 
@@ -306,7 +316,7 @@ class RepackingManager(ParquetManager):
     def configure_task_path(
         self,
         source_path: str,
-        parquet_sampler: Optional[DictConfig] = None,
+        parquet_sampler: DictConfig | None = None,
         path_mode: str = "dir",
     ):
 
@@ -323,12 +333,18 @@ class RepackingManager(ParquetManager):
 
         if self.task:
             # Partition the file paths based on task configuration
-            file_paths = partition_by_groups(file_paths, self.task.total_count)[self.task.index]
-            target_dir = os.path.join(target_dir, f"{self.task.total_count}_{self.task.index}")
+            file_paths = partition_by_groups(file_paths, self.task.total_count)[
+                self.task.index
+            ]
+            target_dir = os.path.join(
+                target_dir, f"{self.task.total_count}_{self.task.index}"
+            )
 
             if size > 1:
                 size = len(
-                    partition_by_groups(range(size), self.task.total_count)[self.task.index]
+                    partition_by_groups(range(size), self.task.total_count)[
+                        self.task.index
+                    ]
                 )
 
         # Get metadata for each Parquet file

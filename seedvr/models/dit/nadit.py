@@ -12,29 +12,33 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, Tuple, Union, Callable
+from typing import Any
+
 import torch
-from torch import nn
-
-from seedvr.common.cache import Cache
-from seedvr.common.utils import get_torch_dtype
-from seedvr.common.distributed.ops import slice_inputs
-
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
+from seedvr.common.cache import Cache
+from seedvr.common.distributed.ops import slice_inputs
+from seedvr.common.utils import get_torch_dtype
+from torch import nn
 
+from ..utils import PretrainedMixin
 from . import na
 from .embedding import TimeEmbedding
 from .modulation import get_ada_layer
 from .nablocks import get_nablock
 from .normalization import get_norm_layer
 from .patch import NaPatchIn, NaPatchOut
-from ..utils import PretrainedMixin
+
 
 # Fake func, no checkpointing is required for inference
-def gradient_checkpointing(module: Union[Callable, nn.Module], *args, enabled: bool, **kwargs):
+def gradient_checkpointing(
+    module: Callable | nn.Module, *args, enabled: bool, **kwargs
+):
     return module(*args, **kwargs)
+
 
 @dataclass
 class NaDiTOutput:
@@ -45,6 +49,7 @@ class NaDiT(PretrainedMixin, FlashPackDiffusersModelMixin, ConfigMixin):
     """
     Native Resolution Diffusers Transformer (NaDiT)
     """
+
     config_name = "config.json"
     gradient_checkpointing = False
 
@@ -54,29 +59,33 @@ class NaDiT(PretrainedMixin, FlashPackDiffusersModelMixin, ConfigMixin):
         vid_in_channels: int = 33,
         vid_out_channels: int = 16,
         vid_dim: int = 3072,
-        txt_in_dim: Optional[int] = 5120,
-        txt_dim: Optional[int] = 3072,
+        txt_in_dim: int | None = 5120,
+        txt_dim: int | None = 3072,
         emb_dim: int = 18432,
         heads: int = 24,
         head_dim: int = 128,
         expand_ratio: int = 4,
-        norm: Optional[str] = "fusedrms",
+        norm: str | None = "fusedrms",
         norm_eps: float = 1e-5,
         ada: str = "single",
         qk_bias: bool = False,
         qk_rope: bool = True,
-        qk_norm: Optional[str] = "fusedrms",
-        patch_size: Union[int, Tuple[int, int, int]] = (1, 2, 2),
+        qk_norm: str | None = "fusedrms",
+        patch_size: int | tuple[int, int, int] = (1, 2, 2),
         num_layers: int = 36,
-        block_type: Union[str, Tuple[str]] = ("mmdit_sr",) * 36,
+        block_type: str | tuple[str] = ("mmdit_sr",) * 36,
         shared_qkv: bool = False,
         shared_mlp: bool = False,
         mlp_type: str = "normal",
-        window: Optional[Tuple] = ((4, 3, 3),) * 36,
-        window_method: Optional[Tuple[str]] = ("720pwin_by_size_bysize", "720pswin_by_size_bysize") * 18,
-        temporal_window_size: Optional[int] = None,
+        window: tuple | None = ((4, 3, 3),) * 36,
+        window_method: tuple[str] | None = (
+            "720pwin_by_size_bysize",
+            "720pswin_by_size_bysize",
+        )
+        * 18,
+        temporal_window_size: int | None = None,
         temporal_shifted: bool = False,
-        dtype: Union[str, torch.dtype] = "float32",
+        dtype: str | torch.dtype = "float32",
         **kwargs: Any,
     ) -> None:
         ada = get_ada_layer(ada)
@@ -161,12 +170,14 @@ class NaDiT(PretrainedMixin, FlashPackDiffusersModelMixin, ConfigMixin):
         txt: torch.FloatTensor,  # l c
         vid_shape: torch.LongTensor,  # b 3
         txt_shape: torch.LongTensor,  # b 1
-        timestep: Union[int, float, torch.IntTensor, torch.FloatTensor],  # b
+        timestep: int | float | torch.IntTensor | torch.FloatTensor,  # b
         disable_cache: bool = True,  # for test
     ):
         # Text input.
         if txt_shape.size(-1) == 1 and self.need_txt_repeat:
-            txt, txt_shape = na.repeat(txt, txt_shape, "l c -> t l c", t=vid_shape[:, 0])
+            txt, txt_shape = na.repeat(
+                txt, txt_shape, "l c -> t l c", t=vid_shape[:, 0]
+            )
         # slice vid after patching in when using sequence parallelism
         txt = slice_inputs(txt, dim=0)
         txt = self.txt_in(txt)
@@ -208,26 +219,26 @@ class NaDiTUpscaler(nn.Module):
         vid_in_channels: int,
         vid_out_channels: int,
         vid_dim: int,
-        txt_in_dim: Optional[int],
-        txt_dim: Optional[int],
+        txt_in_dim: int | None,
+        txt_dim: int | None,
         emb_dim: int,
         heads: int,
         head_dim: int,
         expand_ratio: int,
-        norm: Optional[str],
+        norm: str | None,
         norm_eps: float,
         ada: str,
         qk_bias: bool,
         qk_rope: bool,
-        qk_norm: Optional[str],
-        patch_size: Union[int, Tuple[int, int, int]],
+        qk_norm: str | None,
+        patch_size: int | tuple[int, int, int],
         num_layers: int,
-        block_type: Union[str, Tuple[str]],
+        block_type: str | tuple[str],
         shared_qkv: bool = False,
         shared_mlp: bool = False,
         mlp_type: str = "normal",
-        window: Optional[Tuple] = None,
-        window_method: Optional[Tuple[str]] = None,
+        window: tuple | None = None,
+        window_method: tuple[str] | None = None,
         temporal_window_size: int = None,
         temporal_shifted: bool = False,
         **kwargs,
@@ -319,14 +330,16 @@ class NaDiTUpscaler(nn.Module):
         txt: torch.FloatTensor,  # l c
         vid_shape: torch.LongTensor,  # b 3
         txt_shape: torch.LongTensor,  # b 1
-        timestep: Union[int, float, torch.IntTensor, torch.FloatTensor],  # b
-        downscale: Union[int, float, torch.IntTensor, torch.FloatTensor],  # b
+        timestep: int | float | torch.IntTensor | torch.FloatTensor,  # b
+        downscale: int | float | torch.IntTensor | torch.FloatTensor,  # b
         disable_cache: bool = False,  # for test
     ):
 
         # Text input.
         if txt_shape.size(-1) == 1 and self.need_txt_repeat:
-            txt, txt_shape = na.repeat(txt, txt_shape, "l c -> t l c", t=vid_shape[:, 0])
+            txt, txt_shape = na.repeat(
+                txt, txt_shape, "l c -> t l c", t=vid_shape[:, 0]
+            )
         # slice vid after patching in when using sequence parallelism
         txt = slice_inputs(txt, dim=0)
         txt = self.txt_in(txt)

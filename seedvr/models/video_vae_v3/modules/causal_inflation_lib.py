@@ -14,27 +14,30 @@
 
 import math
 from contextlib import contextmanager
-from typing import List, Optional, Union
+
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from diffusers.models.normalization import RMSNorm
 from einops import rearrange
-from torch import Tensor, nn
-from torch.nn import Conv3d
-
 from seedvr.common.distributed.advanced import (
-    get_next_sequence_parallel_rank,
-    get_prev_sequence_parallel_rank,
     get_sequence_parallel_group,
     get_sequence_parallel_rank,
-    get_sequence_parallel_world_size,
 )
-from seedvr.common.utils import safe_pad_operation
 from seedvr.common.logger import get_logger
-from seedvr.models.video_vae_v3.modules.context_parallel_lib import cache_send_recv, get_cache_size
+from seedvr.common.utils import safe_pad_operation
+from seedvr.models.video_vae_v3.modules.context_parallel_lib import (
+    cache_send_recv,
+    get_cache_size,
+)
 from seedvr.models.video_vae_v3.modules.global_config import get_norm_limit
-from seedvr.models.video_vae_v3.modules.types import MemoryState, _inflation_mode_t, _memory_device_t
+from seedvr.models.video_vae_v3.modules.types import (
+    MemoryState,
+    _inflation_mode_t,
+    _memory_device_t,
+)
+from torch import Tensor, nn
+from torch.nn import Conv3d
 
 logger = get_logger(__name__)
 
@@ -145,7 +148,9 @@ class InflatedCausalConv3d(Conv3d):
             if next_catch_size != 0:
                 assert next_catch_size <= x[idx].size(split_dim)
                 next_cache = (
-                    x[idx].transpose(0, split_dim)[-next_catch_size:].transpose(0, split_dim)
+                    x[idx]
+                    .transpose(0, split_dim)[-next_catch_size:]
+                    .transpose(0, split_dim)
                 )
 
             # Recursive.
@@ -164,7 +169,7 @@ class InflatedCausalConv3d(Conv3d):
 
     def forward(
         self,
-        input: Union[Tensor, List[Tensor]],
+        input: Tensor | list[Tensor],
         memory_state: MemoryState = MemoryState.UNSET,
     ) -> Tensor:
         assert memory_state != MemoryState.UNSET
@@ -178,7 +183,9 @@ class InflatedCausalConv3d(Conv3d):
             return self.basic_forward(input, memory_state)
         return self.slicing_forward(input, memory_state)
 
-    def basic_forward(self, input: Tensor, memory_state: MemoryState = MemoryState.UNSET):
+    def basic_forward(
+        self, input: Tensor, memory_state: MemoryState = MemoryState.UNSET
+    ):
         mem_size = self.stride[0] - self.kernel_size[0]
         if (self.memory is not None) and (memory_state == MemoryState.ACTIVE):
             input = extend_head(input, memory=self.memory, times=-1)
@@ -201,7 +208,7 @@ class InflatedCausalConv3d(Conv3d):
 
     def slicing_forward(
         self,
-        input: Union[Tensor, List[Tensor]],
+        input: Tensor | list[Tensor],
         memory_state: MemoryState = MemoryState.UNSET,
     ) -> Tensor:
         squeeze_out = False
@@ -211,20 +218,24 @@ class InflatedCausalConv3d(Conv3d):
 
         cache_size = self.kernel_size[0] - self.stride[0]
         cache = cache_send_recv(
-            input, cache_size=cache_size, memory=self.memory, times=self.temporal_padding * 2
+            input,
+            cache_size=cache_size,
+            memory=self.memory,
+            times=self.temporal_padding * 2,
         )
 
         # For slice=4 and sp=2, and 17 frames in total
         #                  sp0                  sp1
         # slice 0: [`0 0` 0 1 2 {3 4}]   [{3 4} 5 6 (7 8)]    extend=`0 0` cache={3 4} memory=(7 8)
         # slice 1: [(7 8) 9 10 {11 12}]  [{11 12} 13 14 15 16]
-        sp_rank = 0 # get_sequence_parallel_rank()
-        sp_size = 1 # get_sequence_parallel_world_size()
-        sp_group = None # get_sequence_parallel_group()
-        send_dst = None #get_next_sequence_parallel_rank()
-        recv_src = None #get_prev_sequence_parallel_rank()
+        sp_rank = 0  # get_sequence_parallel_rank()
+        sp_size = 1  # get_sequence_parallel_world_size()
+        sp_group = None  # get_sequence_parallel_group()
+        send_dst = None  # get_next_sequence_parallel_rank()
+        recv_src = None  # get_prev_sequence_parallel_rank()
         if (
-            memory_state in [MemoryState.INITIALIZING, MemoryState.ACTIVE]  # use_slicing
+            memory_state
+            in [MemoryState.INITIALIZING, MemoryState.ACTIVE]  # use_slicing
             and not self.training
             and (self.memory_device is not None)
             and sp_rank in [0, sp_size - 1]
@@ -260,12 +271,16 @@ class InflatedCausalConv3d(Conv3d):
             cache_size = 0
             if i < len(input) - 1:
                 cache_len = cache.size(2) if cache is not None else 0
-                cache_size = get_cache_size(self, input[i].size(2) + cache_len, pad_len=0)
+                cache_size = get_cache_size(
+                    self, input[i].size(2) + cache_len, pad_len=0
+                )
             if cache_size != 0:
                 if cache_size > input[i].size(2) and cache is not None:
                     input[i] = torch.cat([cache, input[i]], dim=2)
                     cache = None
-                assert cache_size <= input[i].size(2), f"{cache_size} > {input[i].size(2)}"
+                assert cache_size <= input[i].size(
+                    2
+                ), f"{cache_size} > {input[i].size(2)}"
                 next_cache = input[i][:, :, -cache_size:]
 
             # Conv forward for this input slice.
@@ -287,10 +302,19 @@ class InflatedCausalConv3d(Conv3d):
             output_numel = sum(o.numel() for o in output)
         else:
             raise NotImplementedError
-        return (2 * math.prod(self.kernel_size) * self.in_channels * (output_numel / 1e6)) / 1e6
+        return (
+            2 * math.prod(self.kernel_size) * self.in_channels * (output_numel / 1e6)
+        ) / 1e6
 
     def _load_from_state_dict(
-        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
     ):
         if self.inflation_mode != "none":
             state_dict = modify_state_dict(
@@ -347,8 +371,13 @@ def causal_norm_wrapper(norm_layer: nn.Module, x: torch.Tensor) -> torch.Tensor:
             t = x.size(2)
             x = rearrange(x, "b c t h w -> (b t) c h w")
             memory_occupy = x.numel() * x.element_size() / 1024**3
-            if isinstance(norm_layer, nn.GroupNorm) and memory_occupy > get_norm_limit():
-                num_chunks = min(4 if x.element_size() == 2 else 2, norm_layer.num_groups)
+            if (
+                isinstance(norm_layer, nn.GroupNorm)
+                and memory_occupy > get_norm_limit()
+            ):
+                num_chunks = min(
+                    4 if x.element_size() == 2 else 2, norm_layer.num_groups
+                )
                 logger.debug(f"large tensor {x.shape}, norm in {num_chunks} chunks")
                 assert norm_layer.num_groups % num_chunks == 0
                 num_groups_per_chunk = norm_layer.num_groups // num_chunks
@@ -357,7 +386,9 @@ def causal_norm_wrapper(norm_layer: nn.Module, x: torch.Tensor) -> torch.Tensor:
                 weights = norm_layer.weight.chunk(num_chunks, dim=0)
                 biases = norm_layer.bias.chunk(num_chunks, dim=0)
                 for i, (w, b) in enumerate(zip(weights, biases)):
-                    x[i] = F.group_norm(x[i], num_groups_per_chunk, w, b, norm_layer.eps)
+                    x[i] = F.group_norm(
+                        x[i], num_groups_per_chunk, w, b, norm_layer.eps
+                    )
                     x[i] = x[i].to(input_dtype)
                 x = torch.cat(x, dim=1)
             else:
@@ -377,7 +408,7 @@ def remove_head(tensor: Tensor, times: int = 1) -> Tensor:
     return torch.cat(tensors=(tensor[:, :, :1], tensor[:, :, times + 1 :]), dim=2)
 
 
-def extend_head(tensor: Tensor, times: int = 2, memory: Optional[Tensor] = None) -> Tensor:
+def extend_head(tensor: Tensor, times: int = 2, memory: Tensor | None = None) -> Tensor:
     """
     When memory is None:
         - Duplicate first frame features in the down-sampling process.
@@ -392,10 +423,14 @@ def extend_head(tensor: Tensor, times: int = 2, memory: Optional[Tensor] = None)
     else:
         tile_repeat = [1] * tensor.ndim
         tile_repeat[2] = times
-        return torch.cat(tensors=(torch.tile(tensor[:, :, :1], tile_repeat), tensor), dim=2)
+        return torch.cat(
+            tensors=(torch.tile(tensor[:, :, :1], tile_repeat), tensor), dim=2
+        )
 
 
-def inflate_weight(weight_2d: torch.Tensor, weight_3d: torch.Tensor, inflation_mode: str):
+def inflate_weight(
+    weight_2d: torch.Tensor, weight_3d: torch.Tensor, inflation_mode: str
+):
     """
     Inflate a 2D convolution weight matrix to a 3D one.
     Parameters:

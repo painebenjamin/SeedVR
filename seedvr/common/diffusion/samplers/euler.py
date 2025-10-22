@@ -17,15 +17,10 @@
 Euler ODE solver.
 """
 
-from typing import Callable
+from collections.abc import Callable
+
 import torch
-from einops import rearrange
-from torch.nn import functional as F
-
-from seedvr.models.dit_v2 import na
 from diffusers.schedulers.scheduling_utils import SchedulerMixin
-
-from ..types import PredictionType
 from ..utils import expand_dims
 from .base import Sampler, SamplerModelArgs
 
@@ -79,7 +74,9 @@ class EulerSampler(Sampler, SchedulerMixin):
         s = expand_dims(s, x_t.ndim)
         T = self.schedule.T
         # Step from x_t to x_s.
-        pred_x_0, pred_x_T = self.schedule.convert_from_pred(pred, self.prediction_type, x_t, t)
+        pred_x_0, pred_x_T = self.schedule.convert_from_pred(
+            pred, self.prediction_type, x_t, t
+        )
         pred_x_s = self.schedule.forward(pred_x_0, pred_x_T, s.clamp(0, T))
         # Clamp x_s to x_0 and x_T if s is out of bound.
         pred_x_s = pred_x_s.where(s >= 0, pred_x_0)

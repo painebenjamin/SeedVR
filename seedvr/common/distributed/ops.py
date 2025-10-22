@@ -17,17 +17,18 @@ Distributed ops for supporting sequence parallel.
 """
 
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Any
+
 import torch
 import torch.distributed as dist
-from torch import Tensor
-
 from seedvr.common.cache import Cache
 from seedvr.common.distributed.advanced import (
     get_sequence_parallel_group,
     get_sequence_parallel_rank,
     get_sequence_parallel_world_size,
 )
+from torch import Tensor
 
 from .basic import get_device
 
@@ -82,7 +83,8 @@ def _all_to_all(
 ):
     seq_world_size = dist.get_world_size(group)
     input_list = [
-        t.contiguous() for t in torch.tensor_split(local_input, seq_world_size, scatter_dim)
+        t.contiguous()
+        for t in torch.tensor_split(local_input, seq_world_size, scatter_dim)
     ]
     output_list = [torch.empty_like(input_list[0]) for _ in range(seq_world_size)]
     dist.all_to_all(output_list, input_list, group=group)
@@ -113,9 +115,11 @@ class SeqAllToAll(torch.autograd.Function):
         return _all_to_all(local_input, scatter_dim, gather_dim, group)
 
     @staticmethod
-    def backward(ctx: Any, *grad_output: Tensor) -> Tuple[None, Tensor, None, None]:
+    def backward(ctx: Any, *grad_output: Tensor) -> tuple[None, Tensor, None, None]:
         if ctx.async_op:
-            input_t = torch.cat(grad_output[0].split(1), dim=ctx.gather_dim + 1).squeeze(0)
+            input_t = torch.cat(
+                grad_output[0].split(1), dim=ctx.gather_dim + 1
+            ).squeeze(0)
             if ctx.prev_scatter_dim:
                 input_t = input_t.transpose(0, ctx.prev_scatter_dim)
         else:
@@ -131,21 +135,27 @@ class SeqAllToAll(torch.autograd.Function):
 
 class Slice(torch.autograd.Function):
     @staticmethod
-    def forward(ctx: Any, group: dist.ProcessGroup, local_input: Tensor, dim: int) -> Tensor:
+    def forward(
+        ctx: Any, group: dist.ProcessGroup, local_input: Tensor, dim: int
+    ) -> Tensor:
         ctx.group = group
         ctx.rank = dist.get_rank(group)
         seq_world_size = dist.get_world_size(group)
         ctx.seq_world_size = seq_world_size
         ctx.dim = dim
         dim_size = local_input.shape[dim]
-        return local_input.split(dim_size // seq_world_size, dim=dim)[ctx.rank].contiguous()
+        return local_input.split(dim_size // seq_world_size, dim=dim)[
+            ctx.rank
+        ].contiguous()
 
     @staticmethod
-    def backward(ctx: Any, grad_output: Tensor) -> Tuple[None, Tensor, None]:
+    def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor, None]:
         dim_size = list(grad_output.size())
         split_size = dim_size[0]
         dim_size[0] = dim_size[0] * ctx.seq_world_size
-        output = torch.empty(dim_size, dtype=grad_output.dtype, device=torch.cuda.current_device())
+        output = torch.empty(
+            dim_size, dtype=grad_output.dtype, device=torch.cuda.current_device()
+        )
         dist._all_gather_base(output, grad_output, group=ctx.group)
         return (None, torch.cat(output.split(split_size), dim=ctx.dim), None)
 
@@ -157,7 +167,7 @@ class Gather(torch.autograd.Function):
         group: dist.ProcessGroup,
         local_input: Tensor,
         dim: int,
-        grad_scale: Optional[bool] = False,
+        grad_scale: bool | None = False,
     ) -> Tensor:
         ctx.group = group
         ctx.rank = dist.get_rank(group)
@@ -169,12 +179,14 @@ class Gather(torch.autograd.Function):
         split_size = dim_size[0]
         ctx.part_size = dim_size[dim]
         dim_size[0] = dim_size[0] * seq_world_size
-        output = torch.empty(dim_size, dtype=local_input.dtype, device=torch.cuda.current_device())
+        output = torch.empty(
+            dim_size, dtype=local_input.dtype, device=torch.cuda.current_device()
+        )
         dist._all_gather_base(output, local_input.contiguous(), group=ctx.group)
         return torch.cat(output.split(split_size), dim=dim)
 
     @staticmethod
-    def backward(ctx: Any, grad_output: Tensor) -> Tuple[None, Tensor]:
+    def backward(ctx: Any, grad_output: Tensor) -> tuple[None, Tensor]:
         if ctx.grad_scale:
             grad_output = grad_output * ctx.seq_world_size
         return (
@@ -189,7 +201,7 @@ def gather_seq_scatter_heads_qkv(
     qkv_tensor: Tensor,
     *,
     seq_dim: int,
-    qkv_shape: Optional[Tensor] = None,
+    qkv_shape: Tensor | None = None,
     cache: Cache = Cache(disable=True),
     restore_shape: bool = True,
 ):
@@ -298,7 +310,7 @@ def scatter_heads(x: Tensor, dim: int) -> Tensor:
     return Slice.apply(group, x, dim)
 
 
-def gather_heads(x: Tensor, dim: int, grad_scale: Optional[bool] = False) -> Tensor:
+def gather_heads(x: Tensor, dim: int, grad_scale: bool | None = False) -> Tensor:
     """
     A func to gather heads for the attention result in sequence parallel
     """
@@ -312,8 +324,8 @@ def gather_outputs(
     x: Tensor,
     *,
     gather_dim: int,
-    padding_dim: Optional[int] = None,
-    unpad_shape: Optional[Tensor] = None,
+    padding_dim: int | None = None,
+    unpad_shape: Tensor | None = None,
     cache: Cache = Cache(disable=True),
     scale_grad=True,
 ):
@@ -352,13 +364,15 @@ def _broadcast_data(data, shape, dtype, src, group, async_op):
             comms += _broadcast_data(data[i], sub_shape, dtype[i], src, group, async_op)
     elif isinstance(data, dict):
         for key, sub_data in data.items():
-            comms += _broadcast_data(sub_data, shape[key], dtype[key], src, group, async_op)
+            comms += _broadcast_data(
+                sub_data, shape[key], dtype[key], src, group, async_op
+            )
     elif isinstance(data, Tensor):
         comms.append(dist.broadcast(data, src=src, group=group, async_op=async_op))
     return comms
 
 
-def _traverse(data: Any, op: Callable) -> Union[None, List, Dict, Any]:
+def _traverse(data: Any, op: Callable) -> None | list | dict | Any:
     if isinstance(data, (list, tuple)):
         return [_traverse(sub_data, op) for sub_data in data]
     elif isinstance(data, dict):
@@ -438,7 +452,9 @@ class SPDistForward:
                     local_dtypes = _get_dtypes(local_result)
                     if self.comm_shape:
                         group_shapes_lists = [None] * sp_world
-                        dist.all_gather_object(group_shapes_lists, local_shapes, group=group)
+                        dist.all_gather_object(
+                            group_shapes_lists, local_shapes, group=group
+                        )
                         _SEQ_DATA_META_SHAPES[self.name] = group_shapes_lists
                     else:
                         _SEQ_DATA_META_SHAPES[self.name] = [local_shapes] * sp_world

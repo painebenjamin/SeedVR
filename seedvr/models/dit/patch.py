@@ -12,14 +12,13 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Tuple, Union
+
 import torch
 from einops import rearrange
-from torch import nn
-from torch.nn.modules.utils import _triple
-
 from seedvr.common.cache import Cache
 from seedvr.common.distributed.ops import gather_outputs, slice_inputs
+from torch import nn
+from torch.nn.modules.utils import _triple
 
 from . import na
 
@@ -28,7 +27,7 @@ class PatchIn(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        patch_size: Union[int, Tuple[int, int, int]],
+        patch_size: int | tuple[int, int, int],
         dim: int,
     ):
         super().__init__()
@@ -41,7 +40,9 @@ class PatchIn(nn.Module):
         vid: torch.Tensor,
     ) -> torch.Tensor:
         t, h, w = self.patch_size
-        vid = rearrange(vid, "b c (T t) (H h) (W w) -> b T H W (t h w c)", t=t, h=h, w=w)
+        vid = rearrange(
+            vid, "b c (T t) (H h) (W w) -> b T H W (t h w c)", t=t, h=h, w=w
+        )
         vid = self.proj(vid)
         return vid
 
@@ -50,7 +51,7 @@ class PatchOut(nn.Module):
     def __init__(
         self,
         out_channels: int,
-        patch_size: Union[int, Tuple[int, int, int]],
+        patch_size: int | tuple[int, int, int],
         dim: int,
     ):
         super().__init__()
@@ -64,7 +65,9 @@ class PatchOut(nn.Module):
     ) -> torch.Tensor:
         t, h, w = self.patch_size
         vid = self.proj(vid)
-        vid = rearrange(vid, "b T H W (t h w c) -> b c (T t) (H h) (W w)", t=t, h=h, w=w)
+        vid = rearrange(
+            vid, "b T H W (t h w c) -> b c (T t) (H h) (W w)", t=t, h=h, w=w
+        )
         return vid
 
 
@@ -91,7 +94,7 @@ class NaPatchOut(PatchOut):
         vid: torch.FloatTensor,  # l c
         vid_shape: torch.LongTensor,
         cache: Cache = Cache(disable=True),
-    ) -> Tuple[
+    ) -> tuple[
         torch.FloatTensor,
         torch.LongTensor,
     ]:

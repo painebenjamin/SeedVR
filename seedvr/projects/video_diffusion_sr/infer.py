@@ -12,12 +12,11 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import List, Optional, Tuple, Union
+
 import torch
 from einops import rearrange
 from omegaconf import DictConfig, ListConfig
-from torch import Tensor
-
+from safetensors.torch import load_file as load_file_safetensors
 from seedvr.common.config import create_object
 from seedvr.common.decorators import log_on_entry
 from seedvr.common.diffusion import (
@@ -26,21 +25,15 @@ from seedvr.common.diffusion import (
     create_sampling_timesteps_from_config,
     create_schedule_from_config,
 )
-from seedvr.common.distributed import (
-    get_device,
-    get_global_rank,
-)
+from seedvr.common.distributed import get_device
+from seedvr.common.distributed.meta_init_utils import meta_non_persistent_buffer_init_fn
+from seedvr.models.dit_v2 import na
+from torch import Tensor
 
-from safetensors.torch import load_file as load_file_safetensors
-
-from seedvr.common.distributed.meta_init_utils import (
-    meta_non_persistent_buffer_init_fn,
-)
 # from common.fs import download
 
-from seedvr.models.dit_v2 import na
 
-class VideoDiffusionInfer():
+class VideoDiffusionInfer:
     def __init__(self, config: DictConfig):
         self.config = config
 
@@ -113,7 +106,9 @@ class VideoDiffusionInfer():
         self.vae.load_state_dict(state)
 
         # Set causal slicing.
-        if hasattr(self.vae, "set_causal_slicing") and hasattr(self.config.vae, "slicing"):
+        if hasattr(self.vae, "set_causal_slicing") and hasattr(
+            self.config.vae, "slicing"
+        ):
             self.vae.set_causal_slicing(**self.config.vae.slicing)
 
     # ------------------------------ Diffusion ------------------------------ #
@@ -137,7 +132,7 @@ class VideoDiffusionInfer():
     # -------------------------------- Helper ------------------------------- #
 
     @torch.no_grad()
-    def vae_encode(self, samples: List[Tensor]) -> List[Tensor]:
+    def vae_encode(self, samples: list[Tensor]) -> list[Tensor]:
         use_sample = self.config.vae.get("use_sample", True)
         latents = []
         if len(samples) > 0:
@@ -181,7 +176,7 @@ class VideoDiffusionInfer():
         return latents
 
     @torch.no_grad()
-    def vae_decode(self, latents: List[Tensor]) -> List[Tensor]:
+    def vae_decode(self, latents: list[Tensor]) -> list[Tensor]:
         samples = []
         if len(latents) > 0:
             device = get_device()
@@ -238,7 +233,9 @@ class VideoDiffusionInfer():
             return lambda x: m * x + b
 
         img_shift_fn = get_lin_function(x1=256 * 256, y1=1.0, x2=1024 * 1024, y2=3.2)
-        vid_shift_fn = get_lin_function(x1=256 * 256 * 37, y1=1.0, x2=1280 * 720 * 145, y2=5.0)
+        vid_shift_fn = get_lin_function(
+            x1=256 * 256 * 37, y1=1.0, x2=1280 * 720 * 145, y2=5.0
+        )
         shift = torch.where(
             frames > 1,
             vid_shift_fn(heights * widths * frames),
@@ -254,13 +251,13 @@ class VideoDiffusionInfer():
     @torch.no_grad()
     def inference(
         self,
-        noises: List[Tensor],
-        conditions: List[Tensor],
-        texts_pos: Union[List[str], List[Tensor], List[Tuple[Tensor]]],
-        texts_neg: Union[List[str], List[Tensor], List[Tuple[Tensor]]],
-        cfg_scale: Optional[float] = None,
+        noises: list[Tensor],
+        conditions: list[Tensor],
+        texts_pos: list[str] | list[Tensor] | list[tuple[Tensor]],
+        texts_neg: list[str] | list[Tensor] | list[tuple[Tensor]],
+        cfg_scale: float | None = None,
         dit_offload: bool = False,
-    ) -> List[Tensor]:
+    ) -> list[Tensor]:
         assert len(noises) == len(conditions) == len(texts_pos) == len(texts_neg)
         batch_size = len(noises)
 

@@ -113,11 +113,28 @@ We sincerely thank all contributors from the open community for their valuable s
 ## 🔥 Quick Start
 
 1️⃣  Set up environment
+
+**Option 1: Install from source (recommended)**
 ```bash
 git clone https://github.com/bytedance-seed/SeedVR.git
 cd SeedVR
 conda create -n seedvr python=3.10 -y
 conda activate seedvr
+pip install -e .
+pip install flash_attn==2.5.9.post1 --no-build-isolation
+```
+
+**Option 2: Install with extras**
+```bash
+# Install with HuggingFace Hub support
+pip install -e ".[hub]"
+
+# Install with all optional dependencies (except apex and flash_attn)
+pip install -e ".[all]"
+```
+
+**Option 3: Legacy installation**
+```bash
 pip install -r requirements.txt
 pip install flash_attn==2.5.9.post1 --no-build-isolation
 ```

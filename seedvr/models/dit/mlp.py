@@ -12,13 +12,13 @@
 # // See the License for the specific language governing permissions and
 # // limitations under the License.
 
-from typing import Optional
+
 import torch
 import torch.nn.functional as F
 from torch import nn
 
 
-def get_mlp(mlp_type: Optional[str] = "normal"):
+def get_mlp(mlp_type: str | None = "normal"):
     if mlp_type == "normal":
         return MLP
     elif mlp_type == "swiglu":
