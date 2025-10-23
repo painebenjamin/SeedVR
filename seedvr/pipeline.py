@@ -416,6 +416,10 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         # Now iterate over the media in batches.
         output_samples = []
 
+        if overlap >= f:
+            overlap = 0
+            step_size = f
+
         for batch_idx in maybe_use_tqdm(
             range(0, f - overlap, step_size),
             desc="Upsampling",
