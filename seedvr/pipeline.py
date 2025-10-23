@@ -128,7 +128,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
 
     @torch.no_grad()
     def vae_encode(
-        self, samples: list[Tensor], use_sample: bool = True, use_tiling: bool = True
+        self, samples: list[Tensor], use_sample: bool = True, use_tiling: bool = True, use_tqdm: bool = True,
     ) -> list[Tensor]:
         latents = []
         if len(samples) > 0:
@@ -154,10 +154,10 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 if hasattr(self.vae, "preprocess"):
                     sample = self.vae.preprocess(sample)
                 if use_sample:
-                    latent = self.vae.encode(sample, use_tiling=use_tiling).latent
+                    latent = self.vae.encode(sample, use_tiling=use_tiling, use_tqdm=use_tqdm).latent
                 else:
                     # Deterministic vae encode, only used for i2v inference (optionally)
-                    latent = self.vae.encode(sample, use_tiling=use_tiling).posterior.mode().squeeze(2)
+                    latent = self.vae.encode(sample, use_tiling=use_tiling, use_tqdm=use_tqdm).posterior.mode().squeeze(2)
                 latent = latent.unsqueeze(2) if latent.ndim == 4 else latent
                 latent = rearrange(latent, "b c ... -> b ... c")
                 latent = (latent - shift) * scale
@@ -172,7 +172,12 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         return latents
 
     @torch.no_grad()
-    def vae_decode(self, latents: list[Tensor], use_tiling: bool = True) -> list[Tensor]:
+    def vae_decode(
+        self,
+        latents: list[Tensor],
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
+    ) -> list[Tensor]:
         samples = []
         if len(latents) > 0:
             device = get_device()
@@ -197,7 +202,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 latent = latent / scale + shift
                 latent = rearrange(latent, "b ... c -> b c ...")
                 latent = latent.squeeze(2)
-                sample = self.vae.decode(latent, use_tiling=use_tiling).sample
+                sample = self.vae.decode(latent, use_tiling=use_tiling, use_tqdm=use_tqdm).sample
                 if hasattr(self.vae, "postprocess"):
                     sample = self.vae.postprocess(sample)
                 samples.append(sample)
@@ -219,6 +224,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         cfg_rescale: float = 0.0,
         dit_offload: bool = False,
         use_tiling: bool = True,
+        use_tqdm: bool = True,
     ) -> list[Tensor]:
         assert len(noises) == len(conditions)
         batch_size = len(noises)
@@ -272,7 +278,11 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         latents = [latent.to(self.vae.dtype) for latent in latents]
 
         # Vae decode.
-        samples = self.vae_decode(latents, use_tiling=use_tiling)
+        samples = self.vae_decode(
+            latents,
+            use_tiling=use_tiling,
+            use_tqdm=use_tqdm,
+        )
 
         return samples
 
@@ -419,7 +429,11 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                     [batch_media] + [batch_media[:, -1:]] * num_padded_frames, dim=1
                 )
 
-            latents = self.vae_encode([batch_media], use_tiling=use_tiling)
+            latents = self.vae_encode(
+                [batch_media],
+                use_tiling=use_tiling,
+                use_tqdm=use_tqdm,
+            )
             latents = [latent.to(self.dit.dtype) for latent in latents]
             noises = [self.random_seeded_like(latent, generator) for latent in latents]
             aug_noises = [
@@ -439,6 +453,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 cfg_scale,
                 cfg_rescale,
                 use_tiling=use_tiling,
+                use_tqdm=use_tqdm,
             )
             samples = [
                 sample.unsqueeze(1) if sample.ndim == 3 else sample

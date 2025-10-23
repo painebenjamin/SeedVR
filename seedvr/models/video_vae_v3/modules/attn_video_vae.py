@@ -33,6 +33,8 @@ from diffusers.utils import is_torch_version
 from diffusers.utils.accelerate_utils import apply_forward_hook
 from einops import rearrange, repeat
 from flashpack.integrations.diffusers import FlashPackDiffusersModelMixin
+from tqdm import tqdm
+
 from seedvr.common.distributed.advanced import get_sequence_parallel_world_size
 from seedvr.common.logger import get_logger
 from seedvr.common.utils import (
@@ -58,7 +60,6 @@ from seedvr.models.video_vae_v3.modules.types import (
     _memory_device_t,
     _receptive_field_t,
 )
-from tqdm import tqdm
 
 logger = get_logger(__name__)  # pylint: disable=invalid-name
 DEFAULT_LATENT_TILE_SIZE = (48, 48)
@@ -82,9 +83,7 @@ class Upsample3D(Upsample2D):
         super().__init__(*args, **kwargs)
         conv = self.conv if self.name == "conv" else self.Conv2d_0
 
-        assert (
-            type(conv) is not nn.ConvTranspose2d
-        ), f"Unsupported conv type: {type(conv)}"
+        assert type(conv) is not nn.ConvTranspose2d, f"Unsupported conv type: {type(conv)}"
         # Note: lora_layer is not passed into constructor in the original implementation.
         # So we make a simplification.
         conv = init_causal_conv3d(
@@ -140,9 +139,7 @@ class Upsample3D(Upsample2D):
         if self.slicing:
             split_size = hidden_states.size(2) // 2
             hidden_states = list(
-                hidden_states.split(
-                    [split_size, hidden_states.size(2) - split_size], dim=2
-                )
+                hidden_states.split([split_size, hidden_states.size(2) - split_size], dim=2)
             )
         else:
             hidden_states = [hidden_states]
@@ -251,9 +248,7 @@ class Downsample3D(Downsample2D):
 
         if self.use_conv and self.padding == 0 and self.spatial_down:
             pad = (0, 1, 0, 1)
-            hidden_states = safe_pad_operation(
-                hidden_states, pad, mode="constant", value=0
-            )
+            hidden_states = safe_pad_operation(hidden_states, pad, mode="constant", value=0)
 
         assert hidden_states.shape[1] == self.channels
 
@@ -590,9 +585,7 @@ class UNetMidBlock3D(nn.Module):
         time_receptive_field: _receptive_field_t = "half",
     ):
         super().__init__()
-        resnet_groups = (
-            resnet_groups if resnet_groups is not None else min(in_channels // 4, 32)
-        )
+        resnet_groups = resnet_groups if resnet_groups is not None else min(in_channels // 4, 32)
         self.add_attention = add_attention
 
         # there is always at least one resnet
@@ -632,14 +625,10 @@ class UNetMidBlock3D(nn.Module):
                         rescale_output_factor=output_scale_factor,
                         eps=resnet_eps,
                         norm_num_groups=(
-                            resnet_groups
-                            if resnet_time_scale_shift == "default"
-                            else None
+                            resnet_groups if resnet_time_scale_shift == "default" else None
                         ),
                         spatial_norm_dim=(
-                            temb_channels
-                            if resnet_time_scale_shift == "spatial"
-                            else None
+                            temb_channels if resnet_time_scale_shift == "spatial" else None
                         ),
                         residual_connection=True,
                         bias=True,
@@ -670,18 +659,14 @@ class UNetMidBlock3D(nn.Module):
         self.attentions = nn.ModuleList(attentions)
         self.resnets = nn.ModuleList(resnets)
 
-    def forward(
-        self, hidden_states, temb=None, memory_state: MemoryState = MemoryState.DISABLED
-    ):
+    def forward(self, hidden_states, temb=None, memory_state: MemoryState = MemoryState.DISABLED):
         video_length, frame_height, frame_width = hidden_states.size()[-3:]
         hidden_states = self.resnets[0](hidden_states, temb, memory_state=memory_state)
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
             if attn is not None:
                 hidden_states = rearrange(hidden_states, "b c f h w -> (b f) c h w")
                 hidden_states = attn(hidden_states, temb=temb)
-                hidden_states = rearrange(
-                    hidden_states, "(b f) c h w -> b c f h w", f=video_length
-                )
+                hidden_states = rearrange(hidden_states, "(b f) c h w -> b c f h w", f=video_length)
             hidden_states = resnet(hidden_states, temb, memory_state=memory_state)
 
         return hidden_states
@@ -761,9 +746,7 @@ class Encoder3D(nn.Module):
             output_channel = block_out_channels[i]
             is_final_block = i == len(block_out_channels) - 1
             # [Override] to support temporal down block design
-            is_temporal_down_block = (
-                i >= len(block_out_channels) - self.temporal_down_num - 1
-            )
+            is_temporal_down_block = i >= len(block_out_channels) - self.temporal_down_num - 1
             # Note: take the last ones
 
             assert (
@@ -1047,9 +1030,7 @@ class Decoder3D(nn.Module):
                 return custom_forward
 
             if is_torch_version(">=", "1.11.0"):
-                sample = self.mid_block(
-                    sample, latent_embeds, memory_state=memory_state
-                )
+                sample = self.mid_block(sample, latent_embeds, memory_state=memory_state)
                 sample = sample.to(upscale_dtype)
 
                 # up
@@ -1063,9 +1044,7 @@ class Decoder3D(nn.Module):
                     )
             else:
                 # middle
-                sample = self.mid_block(
-                    sample, latent_embeds, memory_state=memory_state
-                )
+                sample = self.mid_block(sample, latent_embeds, memory_state=memory_state)
                 sample = sample.to(upscale_dtype)
 
                 # up
@@ -1131,9 +1110,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         self.spatial_downsample_factor = spatial_downsample_factor
         self.temporal_downsample_factor = temporal_downsample_factor
         self.slicing_sample_min_size = slicing_sample_min_size
-        self.slicing_latent_min_size = slicing_sample_min_size // (
-            2**temporal_scale_num
-        )
+        self.slicing_latent_min_size = slicing_sample_min_size // (2**temporal_scale_num)
         self.grouping = grouping
 
         super().__init__(
@@ -1141,10 +1118,7 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
             out_channels=out_channels,
             # [Override] make sure it can be normally initialized
             down_block_types=tuple(
-                [
-                    down_block_type.replace("3D", "2D")
-                    for down_block_type in down_block_types
-                ]
+                [down_block_type.replace("3D", "2D") for down_block_type in down_block_types]
             ),
             up_block_types=tuple(
                 [up_block_type.replace("3D", "2D") for up_block_type in up_block_types]
@@ -1225,9 +1199,13 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
 
     @apply_forward_hook
     def encode(
-        self, x: torch.FloatTensor, return_dict: bool = True, use_tiling: bool = True
+        self,
+        x: torch.FloatTensor,
+        return_dict: bool = True,
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
     ) -> AutoencoderKLOutput:
-        h = self.slicing_encode(x, use_tiling=use_tiling)
+        h = self.slicing_encode(x, use_tiling=use_tiling, use_tqdm=use_tqdm)
         posterior = DiagonalGaussianDistribution(h)
 
         if not return_dict:
@@ -1237,9 +1215,13 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
 
     @apply_forward_hook
     def decode(
-        self, z: torch.Tensor, return_dict: bool = True, use_tiling: bool = True
+        self,
+        z: torch.Tensor,
+        return_dict: bool = True,
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
     ) -> DecoderOutput | torch.Tensor:
-        decoded = self.slicing_decode(z, use_tiling=use_tiling)
+        decoded = self.slicing_decode(z, use_tiling=use_tiling, use_tqdm=use_tqdm)
 
         if not return_dict:
             return (decoded,)
@@ -1247,7 +1229,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         return DecoderOutput(sample=decoded)
 
     def _encode(
-        self, x: torch.Tensor, memory_state: MemoryState = MemoryState.DISABLED
+        self,
+        x: torch.Tensor,
+        memory_state: MemoryState = MemoryState.DISABLED,
     ) -> torch.Tensor:
         h = self.encoder(x, memory_state=memory_state)
         if self.quant_conv is not None:
@@ -1257,23 +1241,28 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         return output
 
     def _decode(
-        self, z: torch.Tensor, memory_state: MemoryState = MemoryState.DISABLED
+        self,
+        z: torch.Tensor,
+        memory_state: MemoryState = MemoryState.DISABLED,
     ) -> torch.Tensor:
         if self.post_quant_conv is not None:
             z = self.post_quant_conv(z, memory_state=memory_state)
         output = self.decoder(z, memory_state=memory_state)
         return output
 
-    def slicing_encode(self, x: torch.Tensor, use_tiling: bool = True) -> torch.Tensor:
+    def slicing_encode(
+        self,
+        x: torch.Tensor,
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
+    ) -> torch.Tensor:
         sp_size = get_sequence_parallel_world_size()
-        if (
-            self.use_slicing
-            and (x.shape[2] - 1) > self.slicing_sample_min_size * sp_size
-        ):
-            x_slices = x[:, :, 1:].split(
-                split_size=self.slicing_sample_min_size * sp_size, dim=2
-            )
-            progress_bar = tqdm(total=len(x_slices), desc="Encoding")
+        if self.use_slicing and (x.shape[2] - 1) > self.slicing_sample_min_size * sp_size:
+            x_slices = x[:, :, 1:].split(split_size=self.slicing_sample_min_size * sp_size, dim=2)
+            if use_tqdm:
+                progress_bar = tqdm(total=len(x_slices), desc="Encoding")
+            else:
+                progress_bar = None
             encoded_slices = [
                 self.tiled_encode(
                     torch.cat((x[:, :, :1], x_slices[0]), dim=2),
@@ -1283,7 +1272,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                     use_tiling=use_tiling,
                 )
             ]
-            progress_bar.update(1)
+            if progress_bar is not None:
+                progress_bar.update(1)
             for x_idx in range(1, len(x_slices)):
                 encoded_slices.append(
                     self.tiled_encode(
@@ -1294,21 +1284,28 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                         use_tiling=use_tiling,
                     )
                 )
-                progress_bar.update(1)
-            progress_bar.close()
+                if progress_bar is not None:
+                    progress_bar.update(1)
+            if progress_bar is not None:
+                progress_bar.close()
             return torch.cat(encoded_slices, dim=2)
         else:
-            return self.tiled_encode(x, device=self.device, use_tqdm=True, use_tiling=use_tiling)
-
-    def slicing_decode(self, z: torch.Tensor, use_tiling: bool = True) -> torch.Tensor:
-        sp_size = get_sequence_parallel_world_size()
-        if (
-            self.use_slicing
-            and (z.shape[2] - 1) > self.slicing_latent_min_size * sp_size
-        ):
-            z_slices = z[:, :, 1:].split(
-                split_size=self.slicing_latent_min_size * sp_size, dim=2
+            return self.tiled_encode(
+                x,
+                device=self.device,
+                use_tqdm=use_tqdm,
+                use_tiling=use_tiling,
             )
+
+    def slicing_decode(
+        self,
+        z: torch.Tensor,
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
+    ) -> torch.Tensor:
+        sp_size = get_sequence_parallel_world_size()
+        if self.use_slicing and (z.shape[2] - 1) > self.slicing_latent_min_size * sp_size:
+            z_slices = z[:, :, 1:].split(split_size=self.slicing_latent_min_size * sp_size, dim=2)
             progress_bar = None
             if len(z_slices) > 1:
                 progress_bar = tqdm(total=len(z_slices), desc="Decoding")
@@ -1343,9 +1340,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
             return self.tiled_decode(
                 z,
                 device=self.device,
-                use_tqdm=True,
                 memory_state=MemoryState.DISABLED,
                 use_tiling=use_tiling,
+                use_tqdm=use_tqdm,
             )
 
     @torch.no_grad()
@@ -1453,12 +1450,10 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         for h, h_, w, w_ in maybe_use_tqdm(
             local_tasks, desc="Decoding", use_tqdm=use_tqdm and rank == 0
         ):
-            hidden_states_batch = hidden_states[:, :, :, h:h_, w:w_].to(
-                computation_device
+            hidden_states_batch = hidden_states[:, :, :, h:h_, w:w_].to(computation_device)
+            hidden_states_batch = self._decode(hidden_states_batch, memory_state=memory_state).to(
+                data_device
             )
-            hidden_states_batch = self._decode(
-                hidden_states_batch, memory_state=memory_state
-            ).to(data_device)
             hidden_states_batch.clamp_(-1, 1)
             hidden_states_batch = hidden_states_batch[:, :, :out_T]
 
@@ -1492,12 +1487,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
 
         # Handle distributed assembly
         if is_distributed:
-            value_reduce = dist.reduce(
-                values, dst=0, op=dist.ReduceOp.SUM, async_op=True
-            )
-            weight_reduce = dist.reduce(
-                weight, dst=0, op=dist.ReduceOp.SUM, async_op=True
-            )
+            value_reduce = dist.reduce(values, dst=0, op=dist.ReduceOp.SUM, async_op=True)
+            weight_reduce = dist.reduce(weight, dst=0, op=dist.ReduceOp.SUM, async_op=True)
 
             # Wait for the reduction to complete
             value_reduce.wait()
@@ -1532,6 +1523,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         :param device: device
         :param tile_size: tile size
         :param tile_stride: tile stride
+        :param use_tqdm: whether to use tqdm
+        :param memory_state: memory state
+        :param use_tiling: whether to use tiling
         :return: output tensor [B, C, T, H, W]
         """
         if not use_tiling:
@@ -1620,9 +1614,9 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
             local_tasks, desc="Encoding", use_tqdm=use_tqdm and rank == 0
         ):
             hidden_states_batch = video[:, :, :, h:h_, w:w_].to(computation_device)
-            hidden_states_batch = self._encode(
-                hidden_states_batch, memory_state=memory_state
-            ).to(data_device)
+            hidden_states_batch = self._encode(hidden_states_batch, memory_state=memory_state).to(
+                data_device
+            )
 
             mask = self.build_mask(
                 hidden_states_batch,
@@ -1821,17 +1815,21 @@ class VideoAutoencoderKLWrapper(
         x = self.decode(z).sample
         return CausalAutoencoderOutput(x, z, p)
 
-    def encode(self, x: torch.FloatTensor, use_tiling: bool = True) -> CausalEncoderOutput:
+    def encode(
+        self, x: torch.FloatTensor, use_tiling: bool = True, use_tqdm: bool = True
+    ) -> CausalEncoderOutput:
         if x.ndim == 4:
             x = x.unsqueeze(2)
-        p = super().encode(x, use_tiling=use_tiling).latent_dist
+        p = super().encode(x, use_tiling=use_tiling, use_tqdm=use_tqdm).latent_dist
         z = p.sample().squeeze(2)
         return CausalEncoderOutput(z, p)
 
-    def decode(self, z: torch.FloatTensor, use_tiling: bool = True) -> CausalDecoderOutput:
+    def decode(
+        self, z: torch.FloatTensor, use_tiling: bool = True, use_tqdm: bool = True
+    ) -> CausalDecoderOutput:
         if z.ndim == 4:
             z = z.unsqueeze(2)
-        x = super().decode(z, use_tiling=use_tiling).sample.squeeze(2)
+        x = super().decode(z, use_tiling=use_tiling, use_tqdm=use_tqdm).sample.squeeze(2)
         return CausalDecoderOutput(x)
 
     def preprocess(self, x: torch.Tensor):
@@ -1867,6 +1865,4 @@ class VideoAutoencoderKLWrapper(
         set_norm_limit(norm_max_mem)
         for m in self.modules():
             if isinstance(m, InflatedCausalConv3d):
-                m.set_memory_limit(
-                    conv_max_mem if conv_max_mem is not None else float("inf")
-                )
+                m.set_memory_limit(conv_max_mem if conv_max_mem is not None else float("inf"))
