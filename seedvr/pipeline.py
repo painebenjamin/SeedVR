@@ -23,7 +23,13 @@ from seedvr.data.image.transforms.area_resize import area_resize
 from seedvr.models.dit.na import flatten, pack, unflatten, unpack
 from seedvr.models.dit.nadit import NaDiT
 from seedvr.models.embeds import PrecomputedEmbeddings
-from seedvr.models.video_vae_v3.modules.attn_video_vae import VideoAutoencoderKLWrapper
+from seedvr.models.video_vae_v3.modules.attn_video_vae import (
+    DEFAULT_LATENT_TILE_SIZE,
+    DEFAULT_LATENT_TILE_STRIDE,
+    DEFAULT_PIXEL_TILE_SIZE,
+    DEFAULT_PIXEL_TILE_STRIDE,
+    VideoAutoencoderKLWrapper,
+)
 from seedvr.models.video_vae_v3.modules.causal_inflation_lib import InflatedCausalConv3d
 from seedvr.projects.video_diffusion_sr.color_fix import (
     get_wavelet_kernel,
@@ -44,18 +50,14 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         transform_timesteps: bool = True,
     ) -> None:
         super().__init__()
-        embeds = embeds or PrecomputedEmbeddings.default(
-            device=get_device(), dtype=dit.dtype
-        )
+        embeds = embeds or PrecomputedEmbeddings.default(device=get_device(), dtype=dit.dtype)
         self.register_modules(
             dit=dit,
             vae=vae,
             sampler=sampler,
             embeds=embeds,
         )
-        self.wavelet_kernel = get_wavelet_kernel(
-            self.vae.dtype, in_device=self.dit.device
-        )
+        self.wavelet_kernel = get_wavelet_kernel(self.vae.dtype, in_device=self.dit.device)
         self.transform_timesteps = transform_timesteps
 
     def get_condition(self, latent: Tensor, latent_blur: Tensor, task: str) -> Tensor:
@@ -115,9 +117,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         dit = NaDiT.from_single_file(dit_path, device=device)
         vae = VideoAutoencoderKLWrapper.from_single_file(vae_path, device=device)
         sampler = create_sampler_from_config(
-            config=DictConfig(
-                {"type": sampler_type, "prediction_type": sampler_prediction_type}
-            ),
+            config=DictConfig({"type": sampler_type, "prediction_type": sampler_prediction_type}),
             schedule_type=schedule_type,
             schedule_t=schedule_t,
             timesteps_type=timesteps_sampling_type,
@@ -128,7 +128,13 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
 
     @torch.no_grad()
     def vae_encode(
-        self, samples: list[Tensor], use_sample: bool = True, use_tiling: bool = True, use_tqdm: bool = True,
+        self,
+        samples: list[Tensor],
+        use_sample: bool = True,
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_PIXEL_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_PIXEL_TILE_STRIDE,
     ) -> list[Tensor]:
         latents = []
         if len(samples) > 0:
@@ -154,10 +160,26 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 if hasattr(self.vae, "preprocess"):
                     sample = self.vae.preprocess(sample)
                 if use_sample:
-                    latent = self.vae.encode(sample, use_tiling=use_tiling, use_tqdm=use_tqdm).latent
+                    latent = self.vae.encode(
+                        sample,
+                        use_tiling=use_tiling,
+                        use_tqdm=use_tqdm,
+                        tile_size=tile_size,
+                        tile_stride=tile_stride,
+                    ).latent
                 else:
                     # Deterministic vae encode, only used for i2v inference (optionally)
-                    latent = self.vae.encode(sample, use_tiling=use_tiling, use_tqdm=use_tqdm).posterior.mode().squeeze(2)
+                    latent = (
+                        self.vae.encode(
+                            sample,
+                            use_tiling=use_tiling,
+                            use_tqdm=use_tqdm,
+                            tile_size=tile_size,
+                            tile_stride=tile_stride,
+                        )
+                        .posterior.mode()
+                        .squeeze(2)
+                    )
                 latent = latent.unsqueeze(2) if latent.ndim == 4 else latent
                 latent = rearrange(latent, "b c ... -> b ... c")
                 latent = (latent - shift) * scale
@@ -177,6 +199,8 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         latents: list[Tensor],
         use_tiling: bool = True,
         use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_LATENT_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_LATENT_TILE_STRIDE,
     ) -> list[Tensor]:
         samples = []
         if len(latents) > 0:
@@ -202,7 +226,13 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 latent = latent / scale + shift
                 latent = rearrange(latent, "b ... c -> b c ...")
                 latent = latent.squeeze(2)
-                sample = self.vae.decode(latent, use_tiling=use_tiling, use_tqdm=use_tqdm).sample
+                sample = self.vae.decode(
+                    latent,
+                    use_tiling=use_tiling,
+                    use_tqdm=use_tqdm,
+                    tile_size=tile_size,
+                    tile_stride=tile_stride,
+                ).sample
                 if hasattr(self.vae, "postprocess"):
                     sample = self.vae.postprocess(sample)
                 samples.append(sample)
@@ -225,6 +255,10 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         dit_offload: bool = False,
         use_tiling: bool = True,
         use_tqdm: bool = True,
+        tile_size_pixel: tuple[int, int] = DEFAULT_PIXEL_TILE_SIZE,
+        tile_stride_pixel: tuple[int, int] = DEFAULT_PIXEL_TILE_STRIDE,
+        tile_size_latent: tuple[int, int] = DEFAULT_LATENT_TILE_SIZE,
+        tile_stride_latent: tuple[int, int] = DEFAULT_LATENT_TILE_STRIDE,
     ) -> list[Tensor]:
         assert len(noises) == len(conditions)
         batch_size = len(noises)
@@ -233,9 +267,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         if batch_size == 0:
             return []
 
-        (text_pos_embeds, text_pos_shapes), (text_neg_embeds, text_neg_shapes) = (
-            self.embeds.get()
-        )
+        (text_pos_embeds, text_pos_shapes), (text_neg_embeds, text_neg_shapes) = self.embeds.get()
         latents, latents_shapes = flatten(noises)
         latents_cond, _ = flatten(conditions)
 
@@ -261,11 +293,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                     txt_shape=text_neg_shapes,
                     timestep=args.t.repeat(batch_size),
                 ).vid_sample,
-                scale=(
-                    cfg_scale
-                    if (args.i + 1) / len(self.sampler.timesteps) <= 1.0
-                    else 1.0
-                ),
+                scale=(cfg_scale if (args.i + 1) / len(self.sampler.timesteps) <= 1.0 else 1.0),
                 rescale=cfg_rescale,
             ),
         )
@@ -282,6 +310,8 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             latents,
             use_tiling=use_tiling,
             use_tqdm=use_tqdm,
+            tile_size=tile_size_latent,
+            tile_stride=tile_stride_latent,
         )
 
         return samples
@@ -384,6 +414,10 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         cond_noise_scale: float = 0.05,
         use_tqdm: bool = True,
         use_tiling: bool = True,
+        tile_size_latent: tuple[int, int] = (48, 48),
+        tile_size_pixel: tuple[int, int] = (384, 384),
+        tile_stride_latent: tuple[int, int] = (32, 32),
+        tile_stride_pixel: tuple[int, int] = (256, 256),
     ) -> torch.Tensor:
         """
         Generate a video from a media.
@@ -437,12 +471,12 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 [batch_media],
                 use_tiling=use_tiling,
                 use_tqdm=use_tqdm,
+                tile_size=tile_size_latent,
+                tile_stride=tile_stride_latent,
             )
             latents = [latent.to(self.dit.dtype) for latent in latents]
             noises = [self.random_seeded_like(latent, generator) for latent in latents]
-            aug_noises = [
-                self.random_seeded_like(latent, generator) for latent in latents
-            ]
+            aug_noises = [self.random_seeded_like(latent, generator) for latent in latents]
             conditions = [
                 self.get_condition(
                     noise,
@@ -458,11 +492,12 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 cfg_rescale,
                 use_tiling=use_tiling,
                 use_tqdm=use_tqdm,
+                tile_size_pixel=tile_size_pixel,
+                tile_stride_pixel=tile_stride_pixel,
+                tile_size_latent=tile_size_latent,
+                tile_stride_latent=tile_stride_latent,
             )
-            samples = [
-                sample.unsqueeze(1) if sample.ndim == 3 else sample
-                for sample in samples
-            ]
+            samples = [sample.unsqueeze(1) if sample.ndim == 3 else sample for sample in samples]
 
             batch_media = rearrange(batch_media, "c t h w -> t c h w").to(
                 self.wavelet_kernel.device, dtype=self.wavelet_kernel.dtype

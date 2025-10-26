@@ -1204,8 +1204,16 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         return_dict: bool = True,
         use_tiling: bool = True,
         use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_LATENT_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_LATENT_TILE_STRIDE,
     ) -> AutoencoderKLOutput:
-        h = self.slicing_encode(x, use_tiling=use_tiling, use_tqdm=use_tqdm)
+        h = self.slicing_encode(
+            x,
+            use_tiling=use_tiling,
+            use_tqdm=use_tqdm,
+            tile_size=tile_size,
+            tile_stride=tile_stride,
+        )
         posterior = DiagonalGaussianDistribution(h)
 
         if not return_dict:
@@ -1220,8 +1228,16 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         return_dict: bool = True,
         use_tiling: bool = True,
         use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_PIXEL_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_PIXEL_TILE_STRIDE,
     ) -> DecoderOutput | torch.Tensor:
-        decoded = self.slicing_decode(z, use_tiling=use_tiling, use_tqdm=use_tqdm)
+        decoded = self.slicing_decode(
+            z,
+            use_tiling=use_tiling,
+            use_tqdm=use_tqdm,
+            tile_size=tile_size,
+            tile_stride=tile_stride,
+        )
 
         if not return_dict:
             return (decoded,)
@@ -1255,6 +1271,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         x: torch.Tensor,
         use_tiling: bool = True,
         use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_LATENT_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_LATENT_TILE_STRIDE,
     ) -> torch.Tensor:
         sp_size = get_sequence_parallel_world_size()
         if self.use_slicing and (x.shape[2] - 1) > self.slicing_sample_min_size * sp_size:
@@ -1270,6 +1288,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                     memory_state=MemoryState.INITIALIZING,
                     use_tqdm=False,
                     use_tiling=use_tiling,
+                    tile_size=tile_size,
+                    tile_stride=tile_stride,
                 )
             ]
             if progress_bar is not None:
@@ -1282,6 +1302,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                         memory_state=MemoryState.ACTIVE,
                         use_tqdm=False,
                         use_tiling=use_tiling,
+                        tile_size=tile_size,
+                        tile_stride=tile_stride,
                     )
                 )
                 if progress_bar is not None:
@@ -1295,6 +1317,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                 device=self.device,
                 use_tqdm=use_tqdm,
                 use_tiling=use_tiling,
+                tile_size=tile_size,
+                tile_stride=tile_stride,
             )
 
     def slicing_decode(
@@ -1302,6 +1326,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
         z: torch.Tensor,
         use_tiling: bool = True,
         use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_PIXEL_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_PIXEL_TILE_STRIDE,
     ) -> torch.Tensor:
         sp_size = get_sequence_parallel_world_size()
         if self.use_slicing and (z.shape[2] - 1) > self.slicing_latent_min_size * sp_size:
@@ -1317,6 +1343,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                     use_tqdm=False,
                     memory_state=MemoryState.INITIALIZING,
                     use_tiling=use_tiling,
+                    tile_size=tile_size,
+                    tile_stride=tile_stride,
                 )
             ]
             if progress_bar is not None:
@@ -1329,6 +1357,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                         use_tqdm=False,
                         memory_state=MemoryState.ACTIVE,
                         use_tiling=use_tiling,
+                        tile_size=tile_size,
+                        tile_stride=tile_stride,
                     )
                 )
                 if progress_bar is not None:
@@ -1343,6 +1373,8 @@ class VideoAutoencoderKL(diffusers.AutoencoderKL):
                 memory_state=MemoryState.DISABLED,
                 use_tiling=use_tiling,
                 use_tqdm=use_tqdm,
+                tile_size=tile_size,
+                tile_stride=tile_stride,
             )
 
     @torch.no_grad()
