@@ -454,8 +454,11 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             overlap = 0
             step_size = f
 
+        batch_indices = list(range(0, f - overlap, step_size))
+        num_batches = len(batch_indices)
+
         for batch_idx in maybe_use_tqdm(
-            range(0, f - overlap, step_size),
+            batch_indices,
             desc="Upsampling",
             use_tqdm=use_tqdm,
         ):
@@ -470,7 +473,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
             latents = self.vae_encode(
                 [batch_media],
                 use_tiling=use_tiling,
-                use_tqdm=use_tqdm,
+                use_tqdm=use_tqdm and num_batches == 1,
                 tile_size=tile_size_pixel,
                 tile_stride=tile_stride_pixel,
             )
@@ -491,7 +494,7 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 cfg_scale,
                 cfg_rescale,
                 use_tiling=use_tiling,
-                use_tqdm=use_tqdm,
+                use_tqdm=use_tqdm and num_batches == 1,
                 tile_size_pixel=tile_size_pixel,
                 tile_stride_pixel=tile_stride_pixel,
                 tile_size_latent=tile_size_latent,
