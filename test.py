@@ -10,12 +10,6 @@ import datetime
 from cv2 import VideoCapture
 import mediapy
 
-image = Image.open("test_2.png")
-image = torch.from_numpy(np.array(image)) # hwc
-image = rearrange(image, "h w c -> c 1 h w")  #cfhw
-image = image.to(torch.float32) / 255.0  # [0, 1]
-image = image * 2.0 - 1.0  # normalize to [-1, 1]
-
 from seedvr.common.distributed import (
     init_torch,
     get_world_size,
@@ -33,6 +27,7 @@ if get_world_size() > 1:
 #pipeline.dit.to(torch.bfloat16)
 #pipeline.save_pretrained_flashpack("SeedVR2-7B-FlashPack")
 pipeline = SeedVRPipeline.from_pretrained_flashpack("fal/SeedVR2-7B-FlashPack", device=get_device(), use_distributed_loading=get_world_size() > 1)
+"""
 samples = pipeline(
     image,
     height=2768,
@@ -49,11 +44,14 @@ samples = [
 for i, sample in enumerate(samples):
     sample.save(f"sample_{i}.png")
 
+"""
+
 # Now test video
+max_frames = 42
 video_array = []
 video_capture = VideoCapture("test_video.mp4")
 i = 0
-while True:
+while i < max_frames:
     ret, frame = video_capture.read()
     if not ret:
         break
@@ -72,13 +70,14 @@ video_array = rearrange(video_array, "t c h w -> c t h w")
 c, t, h, w = video_array.shape
 
 samples = pipeline(
-    video_array,
-    height=2160,
-    width=3840,
-    #height=1080,
-    #width=1920,
+    media=video_array,
+    target_area=1080*1920,
     batch_size=33,
-    temporal_overlap=8,
+    temporal_overlap=30,
+    use_tiling=True,
 )
-print(f"{samples[0].shape=} {samples[0].dtype=} {samples[0].min()} {samples[0].max()}")
-mediapy.write_video("test_video_output.mp4", samples[0].permute(0, 2, 3, 1).numpy().astype(np.uint8), fps=30)
+print(samples.shape)
+# c t h w -> t h w c
+samples = samples.permute(1, 2, 3, 0)
+print(samples.shape)
+mediapy.write_video("test_video_output.mp4", samples.numpy().astype(np.uint8), fps=30)
