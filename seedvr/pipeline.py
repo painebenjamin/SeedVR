@@ -471,8 +471,8 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 [batch_media],
                 use_tiling=use_tiling,
                 use_tqdm=use_tqdm,
-                tile_size=tile_size_latent,
-                tile_stride=tile_stride_latent,
+                tile_size=tile_size_pixel,
+                tile_stride=tile_stride_pixel,
             )
             latents = [latent.to(self.dit.dtype) for latent in latents]
             noises = [self.random_seeded_like(latent, generator) for latent in latents]

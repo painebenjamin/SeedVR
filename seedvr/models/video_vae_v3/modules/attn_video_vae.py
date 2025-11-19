@@ -1848,20 +1848,50 @@ class VideoAutoencoderKLWrapper(
         return CausalAutoencoderOutput(x, z, p)
 
     def encode(
-        self, x: torch.FloatTensor, use_tiling: bool = True, use_tqdm: bool = True
+        self,
+        x: torch.FloatTensor,
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_LATENT_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_LATENT_TILE_STRIDE,
     ) -> CausalEncoderOutput:
         if x.ndim == 4:
             x = x.unsqueeze(2)
-        p = super().encode(x, use_tiling=use_tiling, use_tqdm=use_tqdm).latent_dist
+        p = (
+            super()
+            .encode(
+                x,
+                use_tiling=use_tiling,
+                use_tqdm=use_tqdm,
+                tile_size=tile_size,
+                tile_stride=tile_stride,
+            )
+            .latent_dist
+        )
         z = p.sample().squeeze(2)
         return CausalEncoderOutput(z, p)
 
     def decode(
-        self, z: torch.FloatTensor, use_tiling: bool = True, use_tqdm: bool = True
+        self,
+        z: torch.FloatTensor,
+        use_tiling: bool = True,
+        use_tqdm: bool = True,
+        tile_size: tuple[int, int] = DEFAULT_LATENT_TILE_SIZE,
+        tile_stride: tuple[int, int] = DEFAULT_LATENT_TILE_STRIDE,
     ) -> CausalDecoderOutput:
         if z.ndim == 4:
             z = z.unsqueeze(2)
-        x = super().decode(z, use_tiling=use_tiling, use_tqdm=use_tqdm).sample.squeeze(2)
+        x = (
+            super()
+            .decode(
+                z,
+                use_tiling=use_tiling,
+                use_tqdm=use_tqdm,
+                tile_size=tile_size,
+                tile_stride=tile_stride,
+            )
+            .sample.squeeze(2)
+        )
         return CausalDecoderOutput(x)
 
     def preprocess(self, x: torch.Tensor):
