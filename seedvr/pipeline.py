@@ -529,6 +529,8 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
                 .cpu()
                 for sample in samples
             ]
+            # if batch_idx > 0 and overlap > 0:
+            #    samples = [sample[overlap:] for sample in samples]
 
             output_samples.append(samples)
             self._clear_vae_memory()
@@ -536,50 +538,32 @@ class SeedVRPipeline(FlashPackDiffusionPipeline):
         if len(output_samples) == 0 or len(output_samples[0]) == 0:
             return []
 
-        output_dtype = output_samples[0][0].dtype
-        combined_video_output = torch.zeros(
-            f, c, h, w, device="cpu", dtype=output_dtype
-        )
+        # output_samples = [torch.cat(samples, dim=0) for samples in zip(*output_samples)]
+        # torch.cuda.empty_cache()
+        # return output_samples[0].permute(1, 0, 2, 3)
+
+        # Simple approach: just concatenate all frames, skipping overlaps after the first batch
+        all_frames = []
 
         for i, samples in enumerate(output_samples):
             sample_tensor = samples[0]
-            batch_f = sample_tensor.shape[0]
-            batch_start = i * step_size
-            
+
             if i == 0:
-                batch_end = min(batch_f, f)
-                combined_video_output[:batch_end] = sample_tensor[:batch_end]
-                continue
+                # First batch - take all frames
+                all_frames.append(sample_tensor)
+            else:
+                # Subsequent batches - skip the first 'overlap' frames
+                if overlap > 0 and overlap < sample_tensor.shape[0]:
+                    all_frames.append(sample_tensor[overlap:])
+                else:
+                    all_frames.append(sample_tensor)
 
-            actual_overlap = min(overlap, batch_start, batch_f)
-            if actual_overlap > 0:
-                prev_slice = combined_video_output[
-                    batch_start - actual_overlap : batch_start
-                ].to(torch.float32)
-                next_slice = sample_tensor[:actual_overlap].to(torch.float32)
-                weights = torch.linspace(
-                    0.0,
-                    1.0,
-                    steps=actual_overlap,
-                    device="cpu",
-                    dtype=torch.float32,
-                ).view(actual_overlap, 1, 1, 1)
-                blended = prev_slice * (1.0 - weights) + next_slice * weights
-                combined_video_output[
-                    batch_start - actual_overlap : batch_start
-                ] = blended.to(output_dtype)
+        # Concatenate all frames
+        combined_video = torch.cat(all_frames, dim=0)
 
-            remainder_start = actual_overlap
-            remainder_frames = batch_f - actual_overlap
-            batch_end = min(batch_start + remainder_frames, f)
-            actual_remainder = batch_end - batch_start
-            
-            if actual_remainder > 0:
-                combined_video_output[
-                    batch_start:batch_end
-                ] = sample_tensor[
-                    remainder_start : remainder_start + actual_remainder
-                ]
+        # Trim to original length if necessary
+        if combined_video.shape[0] > f:
+            combined_video = combined_video[:f]
 
         # t c h w -> c t h w
-        return combined_video_output.permute(1, 0, 2, 3)
+        return combined_video.permute(1, 0, 2, 3)
